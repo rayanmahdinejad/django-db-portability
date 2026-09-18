@@ -81,6 +81,9 @@ def main(argv=None):
         help="Additional directory name to skip (repeatable)",
     )
     parser.add_argument("--quiet", action="store_true", help="Only print the summary line")
+    parser.add_argument(
+        "--no-progress", action="store_true", help="Disable the live scanning progress line",
+    )
     args = parser.parse_args(argv)
 
     color = _use_color(args.no_color)
@@ -98,19 +101,32 @@ def main(argv=None):
     excludes = DEFAULT_EXCLUDES | set(args.exclude)
 
     files = sorted(iter_python_files(args.paths, excludes))
+    total_files = len(files)
     total = 0
     counts = {}
     files_with_issues = 0
 
-    for path in files:
+    live_progress = sys.stderr.isatty() and not args.no_progress
+    if not args.no_progress:
+        print(f"Scanning {total_files} file(s) for {args.source} -> {args.target} portability issues...",
+              file=sys.stderr)
+
+    for i, path in enumerate(files, 1):
+        if live_progress:
+            print(f"\r\033[K[{i}/{total_files}] {path}", end="", file=sys.stderr, flush=True)
+
         errors, syntax_err = scan_file(path, checks_module)
         if syntax_err is not None:
+            if live_progress:
+                print("\r\033[K", end="", file=sys.stderr)
             print(c("warn", f"! {path}: could not parse ({syntax_err.msg}, line {syntax_err.lineno})"))
             continue
         if not errors:
             continue
 
         files_with_issues += 1
+        if live_progress:
+            print("\r\033[K", end="", file=sys.stderr)
         if not args.quiet:
             print(c("bold", path))
         for lineno, col, message in errors:
@@ -123,6 +139,9 @@ def main(argv=None):
                 print(f"  {loc}  {c(severity, message)}")
         if not args.quiet:
             print()
+
+    if live_progress:
+        print("\r\033[K", end="", file=sys.stderr)
 
     if total == 0:
         print(c("green", f"No {args.source} -> {args.target} portability issues found."))

@@ -10,7 +10,7 @@ from db_portability.checks.postgres_oracle import run as run_postgres_oracle
 
 class PostgresPortabilityChecker:
     name = "db-portability"
-    version = "0.1.0"
+    version = "0.1.1"
 
     def __init__(self, tree, filename="(none)"):
         self.tree = tree
