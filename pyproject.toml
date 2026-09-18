@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,10 +8,17 @@ version = "0.1.0"
 description = "Catch Django code that breaks when ported to another database (postgres -> oracle today), plus runtime helpers for the NULL/empty-string divergence between backends"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = "MIT"
+authors = [
+    { name = "Rayan Mahdinejad", email = "rayan.mahdinejad@gmail.com" },
+]
 dependencies = [
     "flake8>=6.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/rayanmahdinejad/django-db-portability"
+Repository = "https://github.com/rayanmahdinejad/django-db-portability"
 
 [project.optional-dependencies]
 django = ["django>=4.2"]
