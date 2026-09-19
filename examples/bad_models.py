@@ -13,3 +13,6 @@ class Widget(models.Model):
 
     def raw_query(self, cursor):
         cursor.execute("SELECT * FROM widget WHERE name ILIKE 'a%'")
+
+    def unique_names(self):
+        return Widget.objects.order_by("name").distinct("name")

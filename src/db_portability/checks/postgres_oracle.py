@@ -175,6 +175,15 @@ class _Visitor(ast.NodeVisitor):
                         f"({', '.join(hits)}) - will not run on Oracle as-is",
                     )
 
+        if short_name == "distinct" and (node.args or node.keywords):
+            self._add(
+                node,
+                "DBP008",
+                ".distinct(*fields) is PostgreSQL's DISTINCT ON extension - "
+                "Oracle (and every other backend) only supports argument-less "
+                ".distinct()",
+            )
+
         if short_name in CHAR_BASED_FIELDS:
             unique = keyword_value(node, "unique")
             blank = keyword_value(node, "blank")

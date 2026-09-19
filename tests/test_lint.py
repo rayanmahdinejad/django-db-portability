@@ -74,3 +74,13 @@ def test_does_not_flag_unique_blank_with_null():
 def test_does_not_flag_unique_without_blank():
     errors = run("code = models.CharField(max_length=10, unique=True)\n")
     assert errors == []
+
+
+def test_flags_distinct_on_fields():
+    errors = run("qs = SomeModel.objects.order_by('name').distinct('name')\n")
+    assert any(msg.startswith("DBP008") for _, _, msg in errors)
+
+
+def test_does_not_flag_plain_distinct():
+    errors = run("qs = SomeModel.objects.distinct()\n")
+    assert errors == []
