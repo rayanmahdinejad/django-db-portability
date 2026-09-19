@@ -119,15 +119,58 @@ AGGREGATE_FUNC_NAMES = {
     "Variance",
 }
 
+JSON_FIELD_NAMES = {"JSONField"}
+
 # DBP004 (.extra()) and DBP006 (NULL/empty-string trap) need manual review /
 # are data-dependent rather than guaranteed breakage - callers may want to
 # report them at a lower severity than the rest.
 WARN_CODES = {"DBP004", "DBP006"}
 
 
+def _classes_with_json_field(tree):
+    """Names of classes (models) that define at least one JSONField anywhere
+    in their body - used by DBP011 to link `Model.objects...annotate(...)`
+    back to a model known to carry a CLOB/NCLOB-backed column, without a
+    full Django app registry."""
+    names = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Call):
+                fname = dotted_name(sub.func)
+                short = fname.rsplit(".", 1)[-1] if fname else ""
+                if short in JSON_FIELD_NAMES:
+                    names.add(node.name)
+                    break
+    return names
+
+
+def _chain_root_and_calls(node):
+    """Walk back through a `Root.a().b().c(...)` call chain starting from
+    `node`'s callee. Returns the leftmost Name id (or None) and the set of
+    method short-names called earlier in the chain, so callers can tell
+    e.g. whether `.values()`/`.only()` already narrowed the SELECT."""
+    calls = set()
+    current = node.func.value if isinstance(node.func, ast.Attribute) else None
+    while isinstance(current, ast.Call):
+        fname = dotted_name(current.func)
+        short = fname.rsplit(".", 1)[-1] if fname else ""
+        if short:
+            calls.add(short)
+        current = (
+            current.func.value if isinstance(current.func, ast.Attribute) else None
+        )
+    while isinstance(current, ast.Attribute):
+        current = current.value
+    root = current.id if isinstance(current, ast.Name) else None
+    return root, calls
+
+
 class _Visitor(ast.NodeVisitor):
-    def __init__(self):
+    def __init__(self, json_field_classes=frozenset()):
         self.errors = []
+        self.json_field_classes = json_field_classes
 
     def _add(self, node, code, message):
         self.errors.append((node.lineno, node.col_offset, f"{code} {message}"))
@@ -234,6 +277,23 @@ class _Visitor(ast.NodeVisitor):
                     ".update(col=Subquery(...))",
                 )
 
+            if names & AGGREGATE_FUNC_NAMES:
+                root, chain_calls = _chain_root_and_calls(node)
+                if root in self.json_field_classes and not (
+                    chain_calls & {"values", "only"}
+                ):
+                    self._add(
+                        node,
+                        "DBP011",
+                        f"'{root}' has a JSONField, and this .annotate() "
+                        "aggregate is applied without a prior .values()/"
+                        ".only() to narrow the SELECT - Django's GROUP BY "
+                        "will include every other selected column, and "
+                        "Oracle rejects a JSONField's CLOB/NCLOB column in "
+                        "GROUP BY (ORA-00932), even though PostgreSQL's "
+                        "jsonb tolerates it",
+                    )
+
         if short_name == "CharField":
             max_length = keyword_value(node, "max_length")
             if max_length is None or is_none(max_length):
@@ -251,6 +311,6 @@ class _Visitor(ast.NodeVisitor):
 
 def run(tree):
     """Return sorted (lineno, col, "CODE message") tuples for a parsed module."""
-    visitor = _Visitor()
+    visitor = _Visitor(json_field_classes=_classes_with_json_field(tree))
     visitor.visit(tree)
     return sorted(visitor.errors)

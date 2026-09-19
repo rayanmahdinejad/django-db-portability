@@ -46,9 +46,16 @@ flake8 --select=DBP myproject/
 | DBP008 | `.distinct(*fields)` — PostgreSQL's `DISTINCT ON`, unsupported on every other backend |
 | DBP009 | `CharField` without `max_length` — fine on Postgres, fails Oracle's system check (`fields.E120`) |
 | DBP010 | `.annotate()` combining an aggregate (`Count`, `Sum`, ...) with a `Subquery`-based annotation — the resulting `GROUP BY` contains a subquery expression, which Oracle rejects (`ORA-22818`), even if the queryset is only ever used as the value inside another `.update(col=Subquery(...))` |
+| DBP011 | `.annotate()` with an aggregate (`Count`, `Sum`, ...) on a model known (in the same file) to have a `JSONField`, without a prior `.values()`/`.only()` to narrow the `SELECT` — the aggregate forces `GROUP BY` on every other selected column, and Oracle rejects a `JSONField`'s `CLOB`/`NCLOB` column there (`ORA-00932`), even though PostgreSQL's `jsonb` tolerates it |
 
 DBP0xx is reserved for `postgres -> oracle`. A future pair gets its own
 block (DBP1xx, DBP2xx, ...) so codes stay stable as pairs are added.
+
+DBP011 links a queryset back to its model by name within the same file (no
+Django app registry is loaded), so it won't catch the model and the
+`.annotate()` call living in separate files (e.g. `models.py` vs `views.py`)
+— only cases where both appear together, such as a manager/queryset method
+defined on the model itself.
 
 Add to your CI lint step or `setup.cfg`:
 

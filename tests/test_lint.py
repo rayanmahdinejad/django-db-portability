@@ -132,3 +132,45 @@ def test_does_not_flag_annotate_with_only_subquery():
         "qs = UserCourse.objects.annotate(latest=Subquery(inner_qs.values('n')[:1]))\n"
     )
     assert errors == []
+
+
+def test_flags_aggregate_annotate_on_model_with_json_field():
+    errors = run(
+        "class Trainee(models.Model):\n"
+        "    business_info = models.JSONField()\n"
+        "\n"
+        "qs = Trainee.objects.filter(active=True).annotate(\n"
+        "    open_courses=Count('user_id__usercourse', distinct=True),\n"
+        ")\n"
+    )
+    assert any(msg.startswith("DBP011") for _, _, msg in errors)
+
+
+def test_does_not_flag_aggregate_annotate_after_values():
+    errors = run(
+        "class Trainee(models.Model):\n"
+        "    business_info = models.JSONField()\n"
+        "\n"
+        "qs = Trainee.objects.values('id', 'name').annotate(total=Count('x'))\n"
+    )
+    assert errors == []
+
+
+def test_does_not_flag_aggregate_annotate_after_only():
+    errors = run(
+        "class Trainee(models.Model):\n"
+        "    business_info = models.JSONField()\n"
+        "\n"
+        "qs = Trainee.objects.only('id').annotate(total=Count('x'))\n"
+    )
+    assert errors == []
+
+
+def test_does_not_flag_aggregate_annotate_without_json_field():
+    errors = run(
+        "class UserCourse(models.Model):\n"
+        "    status = models.CharField(max_length=10)\n"
+        "\n"
+        "qs = UserCourse.objects.annotate(total=Count('content'))\n"
+    )
+    assert errors == []

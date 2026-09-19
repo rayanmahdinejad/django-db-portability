@@ -3,6 +3,17 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- DBP011: `.annotate()` combining an aggregate (`Count`, `Sum`, ...) with a
+  model (recognized by name in the same file) that has a `JSONField`,
+  without a prior `.values()`/`.only()` to narrow the `SELECT` — Django's
+  `GROUP BY` then includes every other selected column, and Oracle rejects
+  a `JSONField`'s `CLOB`/`NCLOB` column there (`ORA-00932`), even though
+  PostgreSQL's `jsonb` tolerates it.
+
 ## [0.1.3] - 2026-09-19
 
 ### Added
