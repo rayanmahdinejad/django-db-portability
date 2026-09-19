@@ -7,6 +7,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- DBP010: `.annotate()` combining an aggregate (`Count`, `Sum`, ...) with a
+  `Subquery`-based annotation — Oracle rejects the subquery expression this
+  forces into the `GROUP BY` (`ORA-22818`). Also fires when that queryset is
+  never iterated directly and is only used as the value inside another
+  `.update(col=Subquery(...))`.
 - DBP009: `CharField` without `max_length` — PostgreSQL's varchar needs no
   declared length, so this passes silently there, but Oracle's VARCHAR2
   requires one and Django's system checks (`fields.E120`) will reject it.

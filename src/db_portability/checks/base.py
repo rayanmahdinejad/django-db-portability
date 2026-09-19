@@ -32,3 +32,16 @@ def is_true(node):
 
 def is_none(node):
     return isinstance(node, ast.Constant) and node.value is None
+
+
+def call_names(node):
+    """Short names (last dotted component) of every Call anywhere in this
+    subtree, e.g. to check what a .annotate()/.update() argument expression
+    is built out of without having to track variable assignments."""
+    names = set()
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Call):
+            name = dotted_name(sub.func)
+            if name:
+                names.add(name.rsplit(".", 1)[-1])
+    return names

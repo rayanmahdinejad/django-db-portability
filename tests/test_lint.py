@@ -99,3 +99,36 @@ def test_flags_char_field_with_max_length_none():
 def test_does_not_flag_char_field_with_max_length():
     errors = run("section_title = models.CharField(max_length=150, null=True)\n")
     assert errors == []
+
+
+def test_flags_aggregate_with_subquery_in_annotate():
+    errors = run(
+        "qs = UserCourse.objects.annotate(\n"
+        "    total=Count('content', distinct=True),\n"
+        "    completed=Subquery(inner_qs.values('n')[:1]),\n"
+        ")\n"
+    )
+    assert any(msg.startswith("DBP010") for _, _, msg in errors)
+
+
+def test_flags_aggregate_with_subquery_used_later_in_update():
+    errors = run(
+        "qs = UserCourse.objects.annotate(\n"
+        "    total=Count('content', distinct=True),\n"
+        "    new_status=Case(When(total=0, then=Subquery(inner_qs)), default=1),\n"
+        ")\n"
+        "UserCourse.objects.filter(pk__in=qs).update(status=Subquery(qs))\n"
+    )
+    assert any(msg.startswith("DBP010") for _, _, msg in errors)
+
+
+def test_does_not_flag_annotate_with_only_aggregate():
+    errors = run("qs = UserCourse.objects.annotate(total=Count('content'))\n")
+    assert errors == []
+
+
+def test_does_not_flag_annotate_with_only_subquery():
+    errors = run(
+        "qs = UserCourse.objects.annotate(latest=Subquery(inner_qs.values('n')[:1]))\n"
+    )
+    assert errors == []

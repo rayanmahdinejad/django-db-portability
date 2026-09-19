@@ -16,6 +16,7 @@ are added - see db_portability.checks.REGISTRY.
 import ast
 
 from db_portability.checks.base import (
+    call_names,
     dotted_name,
     is_none,
     is_true,
@@ -106,6 +107,16 @@ CHAR_BASED_FIELDS = {
     "SlugField",
     "EmailField",
     "URLField",
+}
+
+AGGREGATE_FUNC_NAMES = {
+    "Count",
+    "Sum",
+    "Avg",
+    "Min",
+    "Max",
+    "StdDev",
+    "Variance",
 }
 
 # DBP004 (.extra()) and DBP006 (NULL/empty-string trap) need manual review /
@@ -202,6 +213,25 @@ class _Visitor(ast.NodeVisitor):
                     "null=True: Oracle coerces '' to NULL but PostgreSQL "
                     "does not, so unique/empty behavior will diverge "
                     "between backends",
+                )
+
+        if short_name == "annotate" and (node.args or node.keywords):
+            names = set()
+            for arg in node.args:
+                names |= call_names(arg)
+            for kw in node.keywords:
+                names |= call_names(kw.value)
+            if names & AGGREGATE_FUNC_NAMES and "Subquery" in names:
+                self._add(
+                    node,
+                    "DBP010",
+                    ".annotate() combines an aggregate (Count/Sum/Avg/Min/"
+                    "Max/...) with a Subquery-based annotation - the "
+                    "resulting GROUP BY contains a subquery expression, "
+                    "which Oracle rejects (ORA-22818). This holds even if "
+                    "the queryset is never iterated directly and is only "
+                    "used as the value inside another "
+                    ".update(col=Subquery(...))",
                 )
 
         if short_name == "CharField":
