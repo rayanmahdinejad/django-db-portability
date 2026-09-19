@@ -7,6 +7,7 @@ from django.contrib.postgres.aggregates import ArrayAgg
 class Widget(models.Model):
     tags = ArrayField(models.CharField(max_length=20))
     code = models.CharField(max_length=10, unique=True, blank=True)
+    label = models.CharField(null=True)
 
     def find(self):
         return Widget.objects.extra(where=["1=1"])

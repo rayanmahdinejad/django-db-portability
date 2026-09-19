@@ -15,7 +15,13 @@ are added - see db_portability.checks.REGISTRY.
 """
 import ast
 
-from db_portability.checks.base import dotted_name, is_true, keyword_value, string_constant
+from db_portability.checks.base import (
+    dotted_name,
+    is_none,
+    is_true,
+    keyword_value,
+    string_constant,
+)
 
 SOURCE = "postgres"
 TARGET = "oracle"
@@ -196,6 +202,18 @@ class _Visitor(ast.NodeVisitor):
                     "null=True: Oracle coerces '' to NULL but PostgreSQL "
                     "does not, so unique/empty behavior will diverge "
                     "between backends",
+                )
+
+        if short_name == "CharField":
+            max_length = keyword_value(node, "max_length")
+            if max_length is None or is_none(max_length):
+                self._add(
+                    node,
+                    "DBP009",
+                    "CharField without max_length: PostgreSQL's varchar "
+                    "needs no declared length (supports_unlimited_charfield), "
+                    "but Oracle's VARCHAR2 requires one - Django's system "
+                    "checks (fields.E120) will fail on Oracle",
                 )
 
         self.generic_visit(node)

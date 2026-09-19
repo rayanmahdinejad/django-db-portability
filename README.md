@@ -44,6 +44,7 @@ flake8 --select=DBP myproject/
 | DBP006 | `CharField`/`TextField(unique=True, blank=True)` without `null=True` — the NULL/empty-string trap below |
 | DBP007 | Other Postgres-only `contrib` modules (indexes, constraints, operations) |
 | DBP008 | `.distinct(*fields)` — PostgreSQL's `DISTINCT ON`, unsupported on every other backend |
+| DBP009 | `CharField` without `max_length` — fine on Postgres, fails Oracle's system check (`fields.E120`) |
 
 DBP0xx is reserved for `postgres -> oracle`. A future pair gets its own
 block (DBP1xx, DBP2xx, ...) so codes stay stable as pairs are added.

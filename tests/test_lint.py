@@ -84,3 +84,18 @@ def test_flags_distinct_on_fields():
 def test_does_not_flag_plain_distinct():
     errors = run("qs = SomeModel.objects.distinct()\n")
     assert errors == []
+
+
+def test_flags_char_field_without_max_length():
+    errors = run("section_title = models.CharField(null=True)\n")
+    assert any(msg.startswith("DBP009") for _, _, msg in errors)
+
+
+def test_flags_char_field_with_max_length_none():
+    errors = run("section_title = models.CharField(max_length=None, null=True)\n")
+    assert any(msg.startswith("DBP009") for _, _, msg in errors)
+
+
+def test_does_not_flag_char_field_with_max_length():
+    errors = run("section_title = models.CharField(max_length=150, null=True)\n")
+    assert errors == []

@@ -28,3 +28,7 @@ def keyword_value(call, name):
 
 def is_true(node):
     return isinstance(node, ast.Constant) and node.value is True
+
+
+def is_none(node):
+    return isinstance(node, ast.Constant) and node.value is None
