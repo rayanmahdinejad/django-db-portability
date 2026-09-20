@@ -75,3 +75,31 @@ def test_main_rejects_unregistered_pair(tmp_path, capsys):
     err = capsys.readouterr().err
     assert exit_code == 2
     assert "mysql" in err
+
+
+def test_main_writes_html_report(tmp_path, capsys):
+    f = tmp_path / "models.py"
+    f.write_text("from django.contrib.postgres.fields import ArrayField\n")
+    out_path = tmp_path / "report.html"
+    exit_code = cli.main(
+        ["--no-color", "--format", "html", "--output", str(out_path), str(f)]
+    )
+    out = capsys.readouterr().out
+    assert exit_code == 1
+    assert f"HTML report written to {out_path}" in out
+    report = out_path.read_text(encoding="utf-8")
+    assert "DBP001" in report
+    assert str(f) in report
+    assert "<html" in report
+
+
+def test_main_html_report_defaults_to_no_issues_message(tmp_path, capsys, monkeypatch):
+    f = tmp_path / "models.py"
+    f.write_text("x = 1\n")
+    monkeypatch.chdir(tmp_path)
+    exit_code = cli.main(["--no-color", "--format", "html", str(f)])
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "HTML report written to dbp-scan-report.html" in out
+    report = (tmp_path / "dbp-scan-report.html").read_text(encoding="utf-8")
+    assert "No postgres" in report and "portability issues found" in report

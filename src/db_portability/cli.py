@@ -11,6 +11,7 @@ import os
 import sys
 
 from db_portability.checks import available_pairs, get_checks
+from db_portability.report_html import render_html
 
 DEFAULT_EXCLUDES = {
     ".venv", "venv", ".git", "__pycache__", "node_modules",
@@ -84,6 +85,14 @@ def main(argv=None):
     parser.add_argument(
         "--no-progress", action="store_true", help="Disable the live scanning progress line",
     )
+    parser.add_argument(
+        "--format", choices=["text", "html"], default="text",
+        help="Output format (default: text)",
+    )
+    parser.add_argument(
+        "--output", metavar="FILE",
+        help="Where to write the --format html report (default: dbp-scan-report.html). Ignored for text output.",
+    )
     args = parser.parse_args(argv)
 
     color = _use_color(args.no_color)
@@ -99,12 +108,15 @@ def main(argv=None):
 
     warn_codes = getattr(checks_module, "WARN_CODES", set())
     excludes = DEFAULT_EXCLUDES | set(args.exclude)
+    html_format = args.format == "html"
 
     files = sorted(iter_python_files(args.paths, excludes))
     total_files = len(files)
     total = 0
     counts = {}
     files_with_issues = 0
+    records = []
+    syntax_errors = []
 
     live_progress = sys.stderr.isatty() and not args.no_progress
     if not args.no_progress:
@@ -120,6 +132,7 @@ def main(argv=None):
             if live_progress:
                 print("\r\033[K", end="", file=sys.stderr)
             print(c("warn", f"! {path}: could not parse ({syntax_err.msg}, line {syntax_err.lineno})"))
+            syntax_errors.append((path, syntax_err))
             continue
         if not errors:
             continue
@@ -127,21 +140,41 @@ def main(argv=None):
         files_with_issues += 1
         if live_progress:
             print("\r\033[K", end="", file=sys.stderr)
-        if not args.quiet:
+        if not args.quiet and not html_format:
             print(c("bold", path))
         for lineno, col, message in errors:
             code = message.split(" ", 1)[0]
             counts[code] = counts.get(code, 0) + 1
             total += 1
-            if not args.quiet:
-                severity = "warn" if code in warn_codes else "error"
+            severity = "warn" if code in warn_codes else "error"
+            if html_format:
+                records.append({
+                    "file": path, "lineno": lineno, "col": col,
+                    "code": code, "message": message, "severity": severity,
+                })
+            elif not args.quiet:
                 loc = c("dim", f"{lineno}:{col + 1}")
                 print(f"  {loc}  {c(severity, message)}")
-        if not args.quiet:
+        if not args.quiet and not html_format:
             print()
 
     if live_progress:
         print("\r\033[K", end="", file=sys.stderr)
+
+    if html_format:
+        output_path = args.output or "dbp-scan-report.html"
+        report = render_html(records, {
+            "source": args.source,
+            "target": args.target,
+            "total": total,
+            "total_files": total_files,
+            "files_with_issues": files_with_issues,
+            "counts": counts,
+            "syntax_errors": syntax_errors,
+        })
+        with open(output_path, "w", encoding="utf-8") as fh:
+            fh.write(report)
+        print(f"HTML report written to {output_path}")
 
     if total == 0:
         print(c("green", f"No {args.source} -> {args.target} portability issues found."))

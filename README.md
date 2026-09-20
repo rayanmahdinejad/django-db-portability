@@ -95,7 +95,12 @@ dbp-scan --from postgres --to oracle myproject/
 dbp-scan --from oracle --to postgres myproject/
 dbp-scan --quiet myproject/                 # summary line only
 dbp-scan --no-color myproject/ > report.txt
+dbp-scan --format html --output report.html myproject/   # standalone HTML report
 ```
+
+The HTML report is a single self-contained file (no external assets) with a
+summary, a per-file breakdown, and a search/severity filter, so it's easy to
+open locally or publish as a CI artifact.
 
 It skips `migrations/`, `.venv`, `.git`, `__pycache__`, `node_modules`,
 `.tox`, `build`, and `dist` by default (`--exclude NAME` adds more), and
