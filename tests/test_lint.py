@@ -76,6 +76,13 @@ def test_does_not_flag_unique_without_blank():
     assert errors == []
 
 
+def test_does_not_flag_drf_serializer_unique_blank_without_null():
+    errors = run(
+        "code = serializers.CharField(max_length=10, unique=True, blank=True)\n"
+    )
+    assert errors == []
+
+
 def test_flags_distinct_on_fields():
     errors = run("qs = SomeModel.objects.order_by('name').distinct('name')\n")
     assert any(msg.startswith("DBP008") for _, _, msg in errors)
@@ -98,6 +105,33 @@ def test_flags_char_field_with_max_length_none():
 
 def test_does_not_flag_char_field_with_max_length():
     errors = run("section_title = models.CharField(max_length=150, null=True)\n")
+    assert errors == []
+
+
+def test_does_not_flag_drf_serializer_char_field():
+    errors = run("name = serializers.CharField(required=False)\n")
+    assert errors == []
+
+
+def test_does_not_flag_drf_serializer_char_field_nested_in_dict():
+    errors = run('fields = {"detail": serializers.CharField(required=False)}\n')
+    assert errors == []
+
+
+def test_does_not_flag_django_forms_char_field():
+    errors = run("name = forms.CharField()\n")
+    assert errors == []
+
+
+def test_does_not_flag_char_field_used_as_output_field_keyword():
+    errors = run(
+        "x = Coalesce(F('a'), Value('lit'), output_field=models.CharField())\n"
+    )
+    assert errors == []
+
+
+def test_does_not_flag_char_field_used_as_cast_output_field_positional():
+    errors = run("x = Cast(Value('lit'), CharField())\n")
     assert errors == []
 
 

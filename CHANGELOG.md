@@ -3,6 +3,25 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.1] - 2026-09-20
+
+### Fixed
+
+- DBP009 and DBP006 no longer flag `CharField`/`TextField`/etc. calls that
+  aren't actual model field declarations:
+  - `rest_framework.serializers.CharField(...)` / `django.forms.CharField(...)`
+    share a name with `models.CharField` but map to no database column, so
+    Oracle's declared-length requirement never applied to them. On a real
+    DRF-heavy project this was the overwhelming majority of DBP009's
+    findings (e.g. 659 of 665 on one project, all in `serializers.py`/
+    `views.py`, none in `models.py`).
+  - `models.CharField()` used as a bare `output_field=` type marker inside
+    an expression (`Coalesce(..., output_field=CharField())`,
+    `Cast(expr, CharField())`) isn't a stored column either, so it's
+    exempt from Oracle's `fields.E120` check. DBP009 now only fires when
+    the `CharField(...)` call is the direct right-hand side of an
+    assignment (`name = models.CharField(...)`).
+
 ## [0.2.0] - 2026-09-20
 
 ### Added

@@ -146,6 +146,33 @@ def _classes_with_json_field(tree):
     return names
 
 
+def _is_non_model_field_call(func_name):
+    """True if a dotted call name looks like a DRF serializer or Django
+    form field rather than a model field - e.g. `serializers.CharField`
+    or `forms.CharField`. Those share names with `models` fields
+    (CharField, TextField, ...) but map to no database column, so
+    Oracle's declared-length requirement doesn't apply to them."""
+    parts = func_name.split(".")
+    return "serializers" in parts or "forms" in parts
+
+
+def _direct_assignment_call_ids(tree):
+    """id() of every Call that is the direct right-hand side of an
+    assignment (`name = Field(...)`) - i.e. a plausible field declaration,
+    as opposed to a Call used as an argument inside another expression
+    (`output_field=CharField()`, `Cast(expr, CharField())`), which several
+    ORM expressions use as a bare output-type marker rather than a stored
+    column. Comparing by id() (not equality) since AST nodes aren't
+    hashable/comparable by value."""
+    ids = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(
+            node.value, ast.Call
+        ):
+            ids.add(id(node.value))
+    return ids
+
+
 def _chain_root_and_calls(node):
     """Walk back through a `Root.a().b().c(...)` call chain starting from
     `node`'s callee. Returns the leftmost Name id (or None) and the set of
@@ -168,9 +195,10 @@ def _chain_root_and_calls(node):
 
 
 class _Visitor(ast.NodeVisitor):
-    def __init__(self, json_field_classes=frozenset()):
+    def __init__(self, json_field_classes=frozenset(), direct_field_calls=frozenset()):
         self.errors = []
         self.json_field_classes = json_field_classes
+        self.direct_field_calls = direct_field_calls
 
     def _add(self, node, code, message):
         self.errors.append((node.lineno, node.col_offset, f"{code} {message}"))
@@ -244,7 +272,9 @@ class _Visitor(ast.NodeVisitor):
                 ".distinct()",
             )
 
-        if short_name in CHAR_BASED_FIELDS:
+        if short_name in CHAR_BASED_FIELDS and not _is_non_model_field_call(
+            func_name
+        ):
             unique = keyword_value(node, "unique")
             blank = keyword_value(node, "blank")
             null = keyword_value(node, "null")
@@ -294,7 +324,11 @@ class _Visitor(ast.NodeVisitor):
                         "jsonb tolerates it",
                     )
 
-        if short_name == "CharField":
+        if (
+            short_name == "CharField"
+            and not _is_non_model_field_call(func_name)
+            and id(node) in self.direct_field_calls
+        ):
             max_length = keyword_value(node, "max_length")
             if max_length is None or is_none(max_length):
                 self._add(
@@ -311,6 +345,9 @@ class _Visitor(ast.NodeVisitor):
 
 def run(tree):
     """Return sorted (lineno, col, "CODE message") tuples for a parsed module."""
-    visitor = _Visitor(json_field_classes=_classes_with_json_field(tree))
+    visitor = _Visitor(
+        json_field_classes=_classes_with_json_field(tree),
+        direct_field_calls=_direct_assignment_call_ids(tree),
+    )
     visitor.visit(tree)
     return sorted(visitor.errors)
