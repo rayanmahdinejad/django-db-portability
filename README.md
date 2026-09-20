@@ -10,10 +10,11 @@ the specific, well-documented gaps that leak through: source-DB-only
 `contrib` modules, raw SQL with source-DB-only syntax, and the
 empty-string/NULL trap.
 
-Checks are organized by `(source, target)` pair. **Only `postgres -> oracle`
-is implemented today** — see `src/db_portability/checks/`. Adding another
-pair (e.g. `mysql -> oracle`) means writing a sibling module and registering
-it; `dbp-scan`'s `--from`/`--to` picks it up automatically once it exists.
+Checks are organized by `(source, target)` pair. **`postgres -> oracle` and
+`oracle -> postgres` are implemented today** — see
+`src/db_portability/checks/`. Adding another pair (e.g. `mysql -> oracle`)
+means writing a sibling module and registering it; `dbp-scan`'s
+`--from`/`--to` picks it up automatically once it exists.
 
 ## Install
 
@@ -64,16 +65,34 @@ Add to your CI lint step or `setup.cfg`:
 select = E,F,DBP
 ```
 
+### the reverse direction: `oracle -> postgres`
+
+Not exposed through the flake8 plugin (which always runs `postgres ->
+oracle` — see above), but available through `dbp-scan --from oracle --to
+postgres`. This pair is smaller: PostgreSQL is generally more permissive
+than Oracle, so most of what leaks through going this direction is raw SQL
+written against Oracle-only syntax, plus the empty-string/NULL trap biting
+in the opposite direction.
+
+| Code | Flags |
+|------|-------|
+| DBP101 | Raw SQL (`RunSQL`, `cursor.execute`, `.raw()`) containing Oracle-specific syntax (`ROWNUM`, `SYSDATE`, `NVL(`, `DECODE(`, `CONNECT BY`, `MINUS`, `DUAL`, `.NEXTVAL`/`.CURRVAL`, ...) |
+| DBP102 | `.extra()` — raw SQL fragment, needs manual review |
+| DBP103 | `CharField`/`TextField(unique=True, blank=True)` without `null=True` — the reverse NULL/empty-string trap: Oracle coerces repeated blanks to `NULL` (so they pass the unique constraint), PostgreSQL doesn't, so a second blank row that worked on Oracle raises a unique-constraint violation on PostgreSQL |
+
+DBP1xx is reserved for `oracle -> postgres`.
+
 ### `dbp-scan` — readable terminal output
 
 `flake8 --select=DBP` prints one flat line per finding, which turns into an
 unreadable wall of text on a real project. `dbp-scan` runs the same checks
 but groups findings by file and colorizes them, and lets you pick the
-`--from`/`--to` pair (`postgres -> oracle` today):
+`--from`/`--to` pair (`postgres -> oracle` or `oracle -> postgres` today):
 
 ```bash
 dbp-scan myproject/                         # postgres -> oracle (default)
 dbp-scan --from postgres --to oracle myproject/
+dbp-scan --from oracle --to postgres myproject/
 dbp-scan --quiet myproject/                 # summary line only
 dbp-scan --no-color myproject/ > report.txt
 ```

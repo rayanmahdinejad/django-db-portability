@@ -57,6 +57,17 @@ def test_main_supports_from_to_flags(tmp_path, capsys):
     assert exit_code == 0
 
 
+def test_main_supports_oracle_to_postgres(tmp_path, capsys):
+    f = tmp_path / "models.py"
+    f.write_text("cursor.execute('SELECT * FROM t WHERE ROWNUM <= 10')\n")
+    exit_code = cli.main(
+        ["--no-color", "--from", "oracle", "--to", "postgres", str(f)]
+    )
+    out = capsys.readouterr().out
+    assert exit_code == 1
+    assert "DBP101" in out
+
+
 def test_main_rejects_unregistered_pair(tmp_path, capsys):
     f = tmp_path / "models.py"
     f.write_text("x = 1\n")

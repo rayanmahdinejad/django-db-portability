@@ -3,10 +3,23 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.2.0] - 2026-09-20
 
 ### Added
 
+- New `oracle -> postgres` check pair (`DBP1xx`), available via `dbp-scan
+  --from oracle --to postgres` (not exposed through the flake8 plugin,
+  which always runs `postgres -> oracle`):
+  - DBP101: raw SQL (`RunSQL`, `cursor.execute`, `.raw()`) containing
+    Oracle-specific syntax (`ROWNUM`, `SYSDATE`, `NVL(`, `DECODE(`,
+    `CONNECT BY`, `MINUS`, `DUAL`, `.NEXTVAL`/`.CURRVAL`, ...) that will
+    not run on PostgreSQL as-is.
+  - DBP102: `.extra()` — raw SQL fragment, needs manual review.
+  - DBP103: `CharField`/`TextField(unique=True, blank=True)` without
+    `null=True` — the reverse NULL/empty-string trap: Oracle coerces
+    repeated blanks to `NULL` (so they pass the unique constraint),
+    PostgreSQL doesn't, so a second blank row that worked on Oracle
+    raises a unique-constraint violation there.
 - DBP011: `.annotate()` combining an aggregate (`Count`, `Sum`, ...) with a
   model (recognized by name in the same file) that has a `JSONField`,
   without a prior `.values()`/`.only()` to narrow the `SELECT` — Django's
