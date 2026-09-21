@@ -10,6 +10,7 @@ import ast
 import os
 import sys
 
+from db_portability import __version__
 from db_portability.checks import available_pairs, get_checks
 from db_portability.report_html import render_html
 
@@ -63,6 +64,9 @@ def main(argv=None):
         prog="dbp-scan",
         description="Scan a Django project for database code that will break when ported to another backend.",
         epilog=f"Supported --from/--to pairs: {supported}",
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}",
     )
     parser.add_argument(
         "paths", nargs="*", default=["."],

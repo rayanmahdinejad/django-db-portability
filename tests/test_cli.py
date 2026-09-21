@@ -1,4 +1,6 @@
-from db_portability import cli
+import pytest
+
+from db_portability import __version__, cli
 from db_portability.checks import postgres_oracle
 
 
@@ -75,6 +77,14 @@ def test_main_rejects_unregistered_pair(tmp_path, capsys):
     err = capsys.readouterr().err
     assert exit_code == 2
     assert "mysql" in err
+
+
+def test_main_version_flag_prints_version_and_exits(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["--version"])
+    assert exc_info.value.code == 0
+    out = capsys.readouterr().out
+    assert out.strip() == f"dbp-scan {__version__}"
 
 
 def test_main_writes_html_report(tmp_path, capsys):

@@ -1,1 +1,10 @@
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("django-db-portability")
+except PackageNotFoundError:
+    # Package isn't installed (e.g. running from a source checkout without
+    # `pip install -e .`) - keep this in sync with pyproject.toml's version.
+    __version__ = "0.3.0"
+
+__all__ = ["__version__"]
