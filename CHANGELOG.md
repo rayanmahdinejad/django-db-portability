@@ -3,6 +3,20 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] - 2026-09-21
+
+### Added
+
+- `dbp-scan --format html` renders findings as a standalone HTML report
+  (`--output FILE` to name it, defaults to `dbp-scan-report.html`) instead
+  of only printing to the terminal: summary counts, a per-file breakdown,
+  and a severity/search filter, all in a single self-contained file.
+
+### Changed
+
+- The PyPI publish workflow now runs the test suite before building and
+  publishing a release, instead of building/publishing unconditionally.
+
 ## [0.2.1] - 2026-09-20
 
 ### Fixed
