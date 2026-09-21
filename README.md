@@ -10,11 +10,11 @@ the specific, well-documented gaps that leak through: source-DB-only
 `contrib` modules, raw SQL with source-DB-only syntax, and the
 empty-string/NULL trap.
 
-Checks are organized by `(source, target)` pair. **`postgres -> oracle` and
-`oracle -> postgres` are implemented today** — see
-`src/db_portability/checks/`. Adding another pair (e.g. `mysql -> oracle`)
-means writing a sibling module and registering it; `dbp-scan`'s
-`--from`/`--to` picks it up automatically once it exists.
+Checks are organized by `(source, target)` pair. **`postgres -> oracle`,
+`oracle -> postgres`, `postgres -> mysql`, and `mysql -> postgres` are
+implemented today** — see `src/db_portability/checks/`. Adding another pair
+(e.g. `mysql -> oracle`) means writing a sibling module and registering it;
+`dbp-scan`'s `--from`/`--to` picks it up automatically once it exists.
 
 ## Install
 
@@ -82,17 +82,60 @@ in the opposite direction.
 
 DBP1xx is reserved for `oracle -> postgres`.
 
+### `postgres -> mysql`
+
+Also not exposed through the flake8 plugin — available through `dbp-scan
+--from postgres --to mysql`. Similar shape to `postgres -> oracle` (same
+Postgres-only `contrib` modules, same raw-SQL and `.distinct(*fields)`
+risks, same declared-length requirement on character columns), plus
+MySQL's InnoDB index key-length limit, which Postgres has no equivalent
+of. There is **no** empty-string/NULL trap in this direction: MySQL, like
+PostgreSQL, stores `''` as a real, non-NULL value — that divergence is
+specific to Oracle.
+
+| Code | Flags |
+|------|-------|
+| DBP201 | Postgres-only field (`ArrayField`, `HStoreField`, `CITextField`, range fields, ...) |
+| DBP202 | Postgres full-text search (`SearchVector`, `SearchQuery`, `TrigramSimilarity`, ...) — MySQL has its own, incompatible `FULLTEXT`/`MATCH AGAINST` API |
+| DBP203 | Postgres-only aggregate (`ArrayAgg`, `StringAgg`, `BoolAnd`, ...) |
+| DBP204 | `.extra()` — raw SQL fragment, needs manual review |
+| DBP205 | Raw SQL (`RunSQL`, `cursor.execute`, `.raw()`) containing Postgres-only syntax (`ON CONFLICT`, `RETURNING`, `ILIKE`, `::` casts, ...) |
+| DBP206 | Other Postgres-only `contrib` modules (indexes, constraints, operations) |
+| DBP207 | `.distinct(*fields)` — PostgreSQL's `DISTINCT ON`, unsupported on MySQL |
+| DBP208 | `CharField` without `max_length` — fine on Postgres, but MySQL's `VARCHAR` requires a declared length (fails Django's `fields.E120` on MySQL too) |
+| DBP209 | `CharField`/`TextField(unique=True)` or `db_index=True` with `max_length` over ~191 characters — PostgreSQL has no index-length limit, but MySQL's InnoDB key-length limit can reject the index on a `utf8mb4` column that long (`Specified key was too long`); the exact threshold depends on server version/config, so this needs manual review |
+
+DBP2xx is reserved for `postgres -> mysql`.
+
+### `mysql -> postgres`
+
+Available through `dbp-scan --from mysql --to postgres`. Like `oracle ->
+postgres`, this is a smaller pair: PostgreSQL is a stricter, more
+standards-compliant engine, so most of what leaks through here is raw SQL
+written against MySQL-only syntax. No empty-string/NULL trap in this
+direction either — see above.
+
+| Code | Flags |
+|------|-------|
+| DBP301 | Raw SQL (`RunSQL`, `cursor.execute`, `.raw()`) containing MySQL-specific syntax (backtick identifiers, `AUTO_INCREMENT`, `ON DUPLICATE KEY UPDATE`, `GROUP_CONCAT(`, `IFNULL(`, `STR_TO_DATE(`, `DATE_FORMAT(`, `UNSIGNED`, the `LIMIT offset, count` comma form, ...) |
+| DBP302 | `.extra()` — raw SQL fragment, needs manual review |
+
+DBP3xx is reserved for `mysql -> postgres`.
+
 ### `dbp-scan` — readable terminal output
 
 `flake8 --select=DBP` prints one flat line per finding, which turns into an
 unreadable wall of text on a real project. `dbp-scan` runs the same checks
 but groups findings by file and colorizes them, and lets you pick the
-`--from`/`--to` pair (`postgres -> oracle` or `oracle -> postgres` today):
+`--from`/`--to` pair (`postgres -> oracle`, `oracle -> postgres`,
+`postgres -> mysql`, or `mysql -> postgres` today):
 
 ```bash
 dbp-scan myproject/                         # postgres -> oracle (default)
 dbp-scan --from postgres --to oracle myproject/
 dbp-scan --from oracle --to postgres myproject/
+dbp-scan --from postgres --to mysql myproject/
+dbp-scan --from mysql --to postgres myproject/
 dbp-scan --quiet myproject/                 # summary line only
 dbp-scan --no-color myproject/ > report.txt
 dbp-scan --format html --output report.html myproject/   # standalone HTML report

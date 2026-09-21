@@ -3,6 +3,45 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] - 2026-09-21
+
+### Added
+
+- New `postgres -> mysql` check pair (`DBP2xx`), available via `dbp-scan
+  --from postgres --to mysql`:
+  - DBP201/DBP202/DBP203/DBP206: Postgres-only `contrib` fields, full-text
+    search, aggregates, and other modules (indexes/constraints/operations)
+    — none of which exist on MySQL either.
+  - DBP204: `.extra()` — raw SQL fragment, needs manual review.
+  - DBP205: raw SQL containing Postgres-only syntax (`ON CONFLICT`,
+    `RETURNING`, `ILIKE`, `::` casts, ...) that won't run on MySQL as-is.
+  - DBP207: `.distinct(*fields)` — PostgreSQL's `DISTINCT ON`, unsupported
+    on MySQL.
+  - DBP208: `CharField` without `max_length` — fine on Postgres, but
+    MySQL's `VARCHAR` requires a declared length (`fields.E120`).
+  - DBP209: `CharField`/`TextField(unique=True)` or `db_index=True` with
+    `max_length` over ~191 characters — PostgreSQL has no index-length
+    limit, but MySQL's InnoDB key-length limit can reject an index on a
+    `utf8mb4` column that long (`Specified key was too long`).
+  - There is no empty-string/NULL trap in this pair: MySQL, like
+    PostgreSQL, stores `''` as a real, non-NULL value (that divergence is
+    specific to Oracle).
+- New `mysql -> postgres` check pair (`DBP3xx`), available via `dbp-scan
+  --from mysql --to postgres`:
+  - DBP301: raw SQL containing MySQL-specific syntax (backtick
+    identifiers, `AUTO_INCREMENT`, `ON DUPLICATE KEY UPDATE`,
+    `GROUP_CONCAT(`, `IFNULL(`, `STR_TO_DATE(`, `DATE_FORMAT(`,
+    `UNSIGNED`, the `LIMIT offset, count` comma form, ...) that won't run
+    on PostgreSQL as-is.
+  - DBP302: `.extra()` — raw SQL fragment, needs manual review.
+
+### Changed
+
+- Extracted the model-field-vs-serializer/form-field detection helpers
+  (used by DBP009/DBP208 to avoid flagging `serializers.CharField`/
+  `forms.CharField`) out of `postgres_oracle` into `checks/base`, so
+  `postgres_mysql` can share them instead of duplicating the logic.
+
 ## [0.3.0] - 2026-09-21
 
 ### Added
