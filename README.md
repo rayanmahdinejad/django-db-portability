@@ -141,15 +141,40 @@ dbp-scan --no-color myproject/ > report.txt
 dbp-scan --format html --output report.html myproject/   # standalone HTML report
 ```
 
-The HTML report is a single self-contained file (no external assets) with a
-summary, a per-file breakdown, and a search/severity filter, so it's easy to
-open locally or publish as a CI artifact.
-
 It skips `migrations/`, `.venv`, `.git`, `__pycache__`, `node_modules`,
 `.tox`, `build`, and `dist` by default (`--exclude NAME` adds more), and
 exits `1` if any issues were found — same convention as flake8, so it's
 safe to use as a CI gate too. An unregistered pair (e.g. `--from mysql`)
 exits `2` with the list of pairs that are actually implemented.
+
+#### All `dbp-scan` options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `paths` (positional) | `.` (current directory) | One or more files or directories to scan. |
+| `--from DB` | `postgres` | Source database the code is currently written for. |
+| `--to DB` | `oracle` | Target database being ported to. Together with `--from`, picks which check module runs — see the supported pairs above. |
+| `--format {text,html}` | `text` | `text` prints findings to the terminal; `html` writes a standalone report file instead (see below). |
+| `--output FILE` | `dbp-scan-report.html` | Where to write the report when `--format html` is used. Ignored for `--format text`. |
+| `--quiet` | off | Suppress per-file/per-finding output; print only the final summary line. Has no effect with `--format html` (the summary always prints there too, alongside the report). |
+| `--no-color` | off | Disable ANSI colors in terminal output (also respects the `NO_COLOR` env var, and colors are auto-disabled when stdout isn't a terminal). |
+| `--no-progress` | off | Disable the live "`[i/N] path`" scanning progress line normally printed to stderr while scanning. |
+| `--exclude NAME` | (none) | Skip an additional directory name during the scan. Repeatable (`--exclude vendor --exclude fixtures`). Adds to, doesn't replace, the built-in exclude list (`migrations/`, `.venv/`, `.git/`, `__pycache__/`, `node_modules/`, `.tox/`, `build/`, `dist/`). |
+| `--version` | — | Print the installed `dbp-scan`/`django-db-portability` version and exit. |
+| `-h`, `--help` | — | Print usage and exit. |
+
+**Getting the HTML report** — the two flags above that matter are `--format`
+and `--output`:
+
+```bash
+dbp-scan --format html myproject/                         # writes ./dbp-scan-report.html
+dbp-scan --format html --output report.html myproject/    # writes ./report.html instead
+```
+
+The HTML report is a single self-contained file (no external assets) with a
+summary, a per-file breakdown, and a search/severity filter, so it's easy to
+open locally in a browser or publish as a CI artifact (e.g. upload it with
+`actions/upload-artifact` in GitHub Actions).
 
 ## 2. The NULL / empty-string trap
 
