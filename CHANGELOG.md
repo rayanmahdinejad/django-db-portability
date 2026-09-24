@@ -3,6 +3,23 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.5.0] - 2026-09-24
+
+### Added
+
+- Inline suppression comments for `dbp-scan` findings: `# dbp-scan:
+  ignore[CODE] reason` on the same line as a finding excludes it from the
+  issue count and exit code, for code that already handles a flagged
+  difference at runtime (e.g. a `connection.vendor == "oracle"` branch). A
+  comment can list more than one code (`ignore[DBP001,DBP003]`) but must
+  carry a reason — one with no reason leaves the finding active and appends
+  a note asking for one, instead of silently suppressing it.
+- `--show-ignored` lists suppressed findings individually, alongside their
+  reason, instead of just folding them into the summary count. Suppressed
+  findings always show up as a `(N suppressed)` note in the text summary
+  and a "Suppressed" card in the `--format html` report, so they stay
+  auditable even without the flag.
+
 ## [0.4.0] - 2026-09-21
 
 ### Added
