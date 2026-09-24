@@ -158,6 +158,7 @@ exits `2` with the list of pairs that are actually implemented.
 | `--output FILE` | `dbp-scan-report.html` | Where to write the report when `--format html` is used. Ignored for `--format text`. |
 | `--open` | off | Open the `--format html` report in the default browser once it's written. Ignored for `--format text`. Off by default so CI runs never try to launch a browser. |
 | `--quiet` | off | Suppress per-file/per-finding output; print only the final summary line. Has no effect with `--format html` (the summary always prints there too, alongside the report). |
+| `--show-ignored` | off | Also print findings suppressed via a `# dbp-scan: ignore[...]` comment (see below). Off by default so suppressed findings stay out of the way once reviewed. |
 | `--no-color` | off | Disable ANSI colors in terminal output (also respects the `NO_COLOR` env var, and colors are auto-disabled when stdout isn't a terminal). |
 | `--no-progress` | off | Disable the live "`[i/N] path`" scanning progress line normally printed to stderr while scanning. |
 | `--exclude NAME` | (none) | Skip an additional directory name during the scan. Repeatable (`--exclude vendor --exclude fixtures`). Adds to, doesn't replace, the built-in exclude list (`migrations/`, `.venv/`, `.git/`, `__pycache__/`, `node_modules/`, `.tox/`, `build/`, `dist/`). |
@@ -177,6 +178,30 @@ The HTML report is a single self-contained file (no external assets) with a
 summary, a per-file breakdown, and a search/severity filter, so it's easy to
 open locally in a browser or publish as a CI artifact (e.g. upload it with
 `actions/upload-artifact` in GitHub Actions).
+
+#### Suppressing a finding
+
+For code that intentionally branches on the target database (e.g. a
+`connection.vendor == "oracle"` guard already handling the difference a
+check is flagging), silence that one finding with a trailing comment on the
+same line, naming the code(s) and a reason:
+
+```python
+from django.contrib.postgres.fields import ArrayField  # dbp-scan: ignore[DBP001] read-only mirror, Oracle side uses a JSON column instead
+
+if connection.vendor == "oracle":
+    cursor.execute("SELECT * FROM t WHERE ROWNUM <= 10")  # dbp-scan: ignore[DBP101] oracle-only branch, postgres branch below uses LIMIT
+else:
+    cursor.execute("SELECT * FROM t LIMIT 10")
+```
+
+A comment can list more than one code (`ignore[DBP001,DBP003]`), but must
+have a reason — `ignore[DBP001]` with nothing after it leaves the finding
+active and appends a note asking for one, rather than silently suppressing
+it. Suppressed findings are subtracted from the exit-code-relevant count but
+still shown in the summary line (`N issue(s)... (M suppressed)`) and in the
+HTML report's summary card, so they stay auditable; pass `--show-ignored` to
+list them individually alongside their reason.
 
 ## 2. The NULL / empty-string trap
 

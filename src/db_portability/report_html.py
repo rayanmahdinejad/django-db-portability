@@ -136,7 +136,8 @@ def render_html(records, meta):
 
     records: list of dicts with keys file, lineno, col, code, message, severity.
     meta: dict with source, target, total, total_files, files_with_issues,
-          counts (code -> int), syntax_errors (list of (path, SyntaxError)).
+          counts (code -> int), syntax_errors (list of (path, SyntaxError)),
+          suppressed (int, optional).
     """
     esc = html.escape
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -150,6 +151,8 @@ def render_html(records, meta):
         (str(meta["files_with_issues"]), "File(s) with issues"),
         (str(meta["total_files"]), "File(s) scanned"),
     ]
+    if meta.get("suppressed"):
+        cards.append((str(meta["suppressed"]), "Suppressed"))
     cards_html = "".join(
         f'<div class="card"><span class="num">{esc(n)}</span>'
         f'<span class="label">{esc(label)}</span></div>'

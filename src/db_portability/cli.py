@@ -12,7 +12,7 @@ import pathlib
 import sys
 import webbrowser
 
-from db_portability import __version__
+from db_portability import __version__, suppress
 from db_portability.checks import available_pairs, get_checks
 from db_portability.report_html import render_html
 
@@ -89,6 +89,10 @@ def main(argv=None):
     )
     parser.add_argument("--quiet", action="store_true", help="Only print the summary line")
     parser.add_argument(
+        "--show-ignored", action="store_true",
+        help="Also print findings suppressed via '# dbp-scan: ignore[CODE] reason' comments",
+    )
+    parser.add_argument(
         "--no-progress", action="store_true", help="Disable the live scanning progress line",
     )
     parser.add_argument(
@@ -125,6 +129,7 @@ def main(argv=None):
     total = 0
     counts = {}
     files_with_issues = 0
+    suppressed_total = 0
     records = []
     syntax_errors = []
 
@@ -147,16 +152,37 @@ def main(argv=None):
         if not errors:
             continue
 
-        files_with_issues += 1
+        suppressions = suppress.parse_suppressions_from_file(path)
+        active, ignored = [], []
+        for lineno, col, message in errors:
+            code = message.split(" ", 1)[0]
+            severity = "warn" if code in warn_codes else "error"
+            supp = suppressions.get(lineno)
+            if supp is not None and code in supp.codes:
+                if supp.reason:
+                    ignored.append((lineno, col, code, severity, message, supp.reason))
+                    continue
+                message = (
+                    f"{message} [ignore comment on this line has no reason, so it was "
+                    f'NOT suppressed -- add one, e.g. "# dbp-scan: ignore[{code}] why"]'
+                )
+            active.append((lineno, col, code, severity, message))
+
+        for _, _, code, _, _ in active:
+            counts[code] = counts.get(code, 0) + 1
+            total += 1
+        suppressed_total += len(ignored)
+
+        if not active and not (args.show_ignored and ignored):
+            continue
+
+        if active:
+            files_with_issues += 1
         if live_progress:
             print("\r\033[K", end="", file=sys.stderr)
         if not args.quiet and not html_format:
             print(c("bold", path))
-        for lineno, col, message in errors:
-            code = message.split(" ", 1)[0]
-            counts[code] = counts.get(code, 0) + 1
-            total += 1
-            severity = "warn" if code in warn_codes else "error"
+        for lineno, col, code, severity, message in active:
             if html_format:
                 records.append({
                     "file": path, "lineno": lineno, "col": col,
@@ -165,6 +191,17 @@ def main(argv=None):
             elif not args.quiet:
                 loc = c("dim", f"{lineno}:{col + 1}")
                 print(f"  {loc}  {c(severity, message)}")
+        if args.show_ignored:
+            for lineno, col, code, severity, message, reason in ignored:
+                ignored_message = f"[ignored] {message} -- {reason}"
+                if html_format:
+                    records.append({
+                        "file": path, "lineno": lineno, "col": col,
+                        "code": code, "message": ignored_message, "severity": severity,
+                    })
+                elif not args.quiet:
+                    loc = c("dim", f"{lineno}:{col + 1}")
+                    print(f"  {loc}  {c('dim', ignored_message)}")
         if not args.quiet and not html_format:
             print()
 
@@ -181,6 +218,7 @@ def main(argv=None):
             "files_with_issues": files_with_issues,
             "counts": counts,
             "syntax_errors": syntax_errors,
+            "suppressed": suppressed_total,
         })
         with open(output_path, "w", encoding="utf-8") as fh:
             fh.write(report)
@@ -193,12 +231,14 @@ def main(argv=None):
             except webbrowser.Error as exc:
                 print(c("warn", f"Could not open {uri} in a browser: {exc}"), file=sys.stderr)
 
+    suppressed_note = f" ({suppressed_total} suppressed)" if suppressed_total else ""
+
     if total == 0:
-        print(c("green", f"No {args.source} -> {args.target} portability issues found."))
+        print(c("green", f"No {args.source} -> {args.target} portability issues found.") + suppressed_note)
         return 0
 
     summary = ", ".join(f"{code} x{n}" for code, n in sorted(counts.items()))
-    print(c("bold", f"{total} issue(s) in {files_with_issues} file(s): ") + summary)
+    print(c("bold", f"{total} issue(s) in {files_with_issues} file(s): ") + summary + suppressed_note)
     return 1
 
 
