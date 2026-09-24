@@ -8,7 +8,9 @@ of a flat wall of `path:line:col: code message` lines.
 import argparse
 import ast
 import os
+import pathlib
 import sys
+import webbrowser
 
 from db_portability import __version__
 from db_portability.checks import available_pairs, get_checks
@@ -97,6 +99,10 @@ def main(argv=None):
         "--output", metavar="FILE",
         help="Where to write the --format html report (default: dbp-scan-report.html). Ignored for text output.",
     )
+    parser.add_argument(
+        "--open", action="store_true",
+        help="Open the --format html report in the default browser once written. Ignored for text output.",
+    )
     args = parser.parse_args(argv)
 
     color = _use_color(args.no_color)
@@ -179,6 +185,13 @@ def main(argv=None):
         with open(output_path, "w", encoding="utf-8") as fh:
             fh.write(report)
         print(f"HTML report written to {output_path}")
+        if args.open:
+            uri = pathlib.Path(output_path).resolve().as_uri()
+            try:
+                if not webbrowser.open(uri):
+                    raise webbrowser.Error("no browser handler available")
+            except webbrowser.Error as exc:
+                print(c("warn", f"Could not open {uri} in a browser: {exc}"), file=sys.stderr)
 
     if total == 0:
         print(c("green", f"No {args.source} -> {args.target} portability issues found."))

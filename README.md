@@ -156,6 +156,7 @@ exits `2` with the list of pairs that are actually implemented.
 | `--to DB` | `oracle` | Target database being ported to. Together with `--from`, picks which check module runs — see the supported pairs above. |
 | `--format {text,html}` | `text` | `text` prints findings to the terminal; `html` writes a standalone report file instead (see below). |
 | `--output FILE` | `dbp-scan-report.html` | Where to write the report when `--format html` is used. Ignored for `--format text`. |
+| `--open` | off | Open the `--format html` report in the default browser once it's written. Ignored for `--format text`. Off by default so CI runs never try to launch a browser. |
 | `--quiet` | off | Suppress per-file/per-finding output; print only the final summary line. Has no effect with `--format html` (the summary always prints there too, alongside the report). |
 | `--no-color` | off | Disable ANSI colors in terminal output (also respects the `NO_COLOR` env var, and colors are auto-disabled when stdout isn't a terminal). |
 | `--no-progress` | off | Disable the live "`[i/N] path`" scanning progress line normally printed to stderr while scanning. |
@@ -163,12 +164,13 @@ exits `2` with the list of pairs that are actually implemented.
 | `--version` | — | Print the installed `dbp-scan`/`django-db-portability` version and exit. |
 | `-h`, `--help` | — | Print usage and exit. |
 
-**Getting the HTML report** — the two flags above that matter are `--format`
-and `--output`:
+**Getting the HTML report** — the flags that matter are `--format`,
+`--output`, and `--open`:
 
 ```bash
-dbp-scan --format html myproject/                         # writes ./dbp-scan-report.html
-dbp-scan --format html --output report.html myproject/    # writes ./report.html instead
+dbp-scan --format html myproject/                          # writes ./dbp-scan-report.html
+dbp-scan --format html --output report.html myproject/     # writes ./report.html instead
+dbp-scan --format html --open myproject/                   # writes it AND opens it in your browser
 ```
 
 The HTML report is a single self-contained file (no external assets) with a

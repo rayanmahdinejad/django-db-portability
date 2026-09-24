@@ -103,6 +103,42 @@ def test_main_writes_html_report(tmp_path, capsys):
     assert "<html" in report
 
 
+def test_main_open_flag_opens_html_report_in_browser(tmp_path, capsys, monkeypatch):
+    f = tmp_path / "models.py"
+    f.write_text("from django.contrib.postgres.fields import ArrayField\n")
+    out_path = tmp_path / "report.html"
+    opened = []
+    monkeypatch.setattr(cli.webbrowser, "open", lambda uri: opened.append(uri) or True)
+    exit_code = cli.main(
+        ["--no-color", "--format", "html", "--output", str(out_path), "--open", str(f)]
+    )
+    assert exit_code == 1
+    assert len(opened) == 1
+    assert opened[0] == out_path.resolve().as_uri()
+
+
+def test_main_open_flag_ignored_without_html_format(tmp_path, monkeypatch):
+    f = tmp_path / "models.py"
+    f.write_text("x = 1\n")
+    opened = []
+    monkeypatch.setattr(cli.webbrowser, "open", lambda uri: opened.append(uri) or True)
+    cli.main(["--no-color", "--open", str(f)])
+    assert opened == []
+
+
+def test_main_open_flag_warns_when_no_browser_available(tmp_path, capsys, monkeypatch):
+    f = tmp_path / "models.py"
+    f.write_text("x = 1\n")
+    out_path = tmp_path / "report.html"
+    monkeypatch.setattr(cli.webbrowser, "open", lambda uri: False)
+    exit_code = cli.main(
+        ["--no-color", "--format", "html", "--output", str(out_path), "--open", str(f)]
+    )
+    err = capsys.readouterr().err
+    assert exit_code == 0
+    assert "Could not open" in err
+
+
 def test_main_html_report_defaults_to_no_issues_message(tmp_path, capsys, monkeypatch):
     f = tmp_path / "models.py"
     f.write_text("x = 1\n")
