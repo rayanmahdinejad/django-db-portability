@@ -10,11 +10,11 @@ the specific, well-documented gaps that leak through: source-DB-only
 `contrib` modules, raw SQL with source-DB-only syntax, and the
 empty-string/NULL trap.
 
-Checks are organized by `(source, target)` pair. **`postgres -> oracle` and
-`oracle -> postgres` are implemented today** — see
-`src/db_portability/checks/`. Adding another pair (e.g. `mysql -> oracle`)
-means writing a sibling module and registering it; `dbp-scan`'s
-`--from`/`--to` picks it up automatically once it exists.
+Checks are organized by `(source, target)` pair. **`postgres -> oracle`,
+`oracle -> postgres`, `postgres -> mysql`, and `mysql -> postgres` are
+implemented today** — see `src/db_portability/checks/`. Adding another pair
+(e.g. `mysql -> oracle`) means writing a sibling module and registering it;
+`dbp-scan`'s `--from`/`--to` picks it up automatically once it exists.
 
 ## Install
 
@@ -82,31 +82,126 @@ in the opposite direction.
 
 DBP1xx is reserved for `oracle -> postgres`.
 
+### `postgres -> mysql`
+
+Also not exposed through the flake8 plugin — available through `dbp-scan
+--from postgres --to mysql`. Similar shape to `postgres -> oracle` (same
+Postgres-only `contrib` modules, same raw-SQL and `.distinct(*fields)`
+risks, same declared-length requirement on character columns), plus
+MySQL's InnoDB index key-length limit, which Postgres has no equivalent
+of. There is **no** empty-string/NULL trap in this direction: MySQL, like
+PostgreSQL, stores `''` as a real, non-NULL value — that divergence is
+specific to Oracle.
+
+| Code | Flags |
+|------|-------|
+| DBP201 | Postgres-only field (`ArrayField`, `HStoreField`, `CITextField`, range fields, ...) |
+| DBP202 | Postgres full-text search (`SearchVector`, `SearchQuery`, `TrigramSimilarity`, ...) — MySQL has its own, incompatible `FULLTEXT`/`MATCH AGAINST` API |
+| DBP203 | Postgres-only aggregate (`ArrayAgg`, `StringAgg`, `BoolAnd`, ...) |
+| DBP204 | `.extra()` — raw SQL fragment, needs manual review |
+| DBP205 | Raw SQL (`RunSQL`, `cursor.execute`, `.raw()`) containing Postgres-only syntax (`ON CONFLICT`, `RETURNING`, `ILIKE`, `::` casts, ...) |
+| DBP206 | Other Postgres-only `contrib` modules (indexes, constraints, operations) |
+| DBP207 | `.distinct(*fields)` — PostgreSQL's `DISTINCT ON`, unsupported on MySQL |
+| DBP208 | `CharField` without `max_length` — fine on Postgres, but MySQL's `VARCHAR` requires a declared length (fails Django's `fields.E120` on MySQL too) |
+| DBP209 | `CharField`/`TextField(unique=True)` or `db_index=True` with `max_length` over ~191 characters — PostgreSQL has no index-length limit, but MySQL's InnoDB key-length limit can reject the index on a `utf8mb4` column that long (`Specified key was too long`); the exact threshold depends on server version/config, so this needs manual review |
+
+DBP2xx is reserved for `postgres -> mysql`.
+
+### `mysql -> postgres`
+
+Available through `dbp-scan --from mysql --to postgres`. Like `oracle ->
+postgres`, this is a smaller pair: PostgreSQL is a stricter, more
+standards-compliant engine, so most of what leaks through here is raw SQL
+written against MySQL-only syntax. No empty-string/NULL trap in this
+direction either — see above.
+
+| Code | Flags |
+|------|-------|
+| DBP301 | Raw SQL (`RunSQL`, `cursor.execute`, `.raw()`) containing MySQL-specific syntax (backtick identifiers, `AUTO_INCREMENT`, `ON DUPLICATE KEY UPDATE`, `GROUP_CONCAT(`, `IFNULL(`, `STR_TO_DATE(`, `DATE_FORMAT(`, `UNSIGNED`, the `LIMIT offset, count` comma form, ...) |
+| DBP302 | `.extra()` — raw SQL fragment, needs manual review |
+
+DBP3xx is reserved for `mysql -> postgres`.
+
 ### `dbp-scan` — readable terminal output
 
 `flake8 --select=DBP` prints one flat line per finding, which turns into an
 unreadable wall of text on a real project. `dbp-scan` runs the same checks
 but groups findings by file and colorizes them, and lets you pick the
-`--from`/`--to` pair (`postgres -> oracle` or `oracle -> postgres` today):
+`--from`/`--to` pair (`postgres -> oracle`, `oracle -> postgres`,
+`postgres -> mysql`, or `mysql -> postgres` today):
 
 ```bash
 dbp-scan myproject/                         # postgres -> oracle (default)
 dbp-scan --from postgres --to oracle myproject/
 dbp-scan --from oracle --to postgres myproject/
+dbp-scan --from postgres --to mysql myproject/
+dbp-scan --from mysql --to postgres myproject/
 dbp-scan --quiet myproject/                 # summary line only
 dbp-scan --no-color myproject/ > report.txt
 dbp-scan --format html --output report.html myproject/   # standalone HTML report
 ```
-
-The HTML report is a single self-contained file (no external assets) with a
-summary, a per-file breakdown, and a search/severity filter, so it's easy to
-open locally or publish as a CI artifact.
 
 It skips `migrations/`, `.venv`, `.git`, `__pycache__`, `node_modules`,
 `.tox`, `build`, and `dist` by default (`--exclude NAME` adds more), and
 exits `1` if any issues were found — same convention as flake8, so it's
 safe to use as a CI gate too. An unregistered pair (e.g. `--from mysql`)
 exits `2` with the list of pairs that are actually implemented.
+
+#### All `dbp-scan` options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `paths` (positional) | `.` (current directory) | One or more files or directories to scan. |
+| `--from DB` | `postgres` | Source database the code is currently written for. |
+| `--to DB` | `oracle` | Target database being ported to. Together with `--from`, picks which check module runs — see the supported pairs above. |
+| `--format {text,html}` | `text` | `text` prints findings to the terminal; `html` writes a standalone report file instead (see below). |
+| `--output FILE` | `dbp-scan-report.html` | Where to write the report when `--format html` is used. Ignored for `--format text`. |
+| `--open` | off | Open the `--format html` report in the default browser once it's written. Ignored for `--format text`. Off by default so CI runs never try to launch a browser. |
+| `--quiet` | off | Suppress per-file/per-finding output; print only the final summary line. Has no effect with `--format html` (the summary always prints there too, alongside the report). |
+| `--show-ignored` | off | Also print findings suppressed via a `# dbp-scan: ignore[...]` comment (see below). Off by default so suppressed findings stay out of the way once reviewed. |
+| `--no-color` | off | Disable ANSI colors in terminal output (also respects the `NO_COLOR` env var, and colors are auto-disabled when stdout isn't a terminal). |
+| `--no-progress` | off | Disable the live "`[i/N] path`" scanning progress line normally printed to stderr while scanning. |
+| `--exclude NAME` | (none) | Skip an additional directory name during the scan. Repeatable (`--exclude vendor --exclude fixtures`). Adds to, doesn't replace, the built-in exclude list (`migrations/`, `.venv/`, `.git/`, `__pycache__/`, `node_modules/`, `.tox/`, `build/`, `dist/`). |
+| `--version` | — | Print the installed `dbp-scan`/`django-db-portability` version and exit. |
+| `-h`, `--help` | — | Print usage and exit. |
+
+**Getting the HTML report** — the flags that matter are `--format`,
+`--output`, and `--open`:
+
+```bash
+dbp-scan --format html myproject/                          # writes ./dbp-scan-report.html
+dbp-scan --format html --output report.html myproject/     # writes ./report.html instead
+dbp-scan --format html --open myproject/                   # writes it AND opens it in your browser
+```
+
+The HTML report is a single self-contained file (no external assets) with a
+summary, a per-file breakdown, and a search/severity filter, so it's easy to
+open locally in a browser or publish as a CI artifact (e.g. upload it with
+`actions/upload-artifact` in GitHub Actions).
+
+#### Suppressing a finding
+
+For code that intentionally branches on the target database (e.g. a
+`connection.vendor == "oracle"` guard already handling the difference a
+check is flagging), silence that one finding with a trailing comment on the
+same line, naming the code(s) and a reason:
+
+```python
+from django.contrib.postgres.fields import ArrayField  # dbp-scan: ignore[DBP001] read-only mirror, Oracle side uses a JSON column instead
+
+if connection.vendor == "oracle":
+    cursor.execute("SELECT * FROM t WHERE ROWNUM <= 10")  # dbp-scan: ignore[DBP101] oracle-only branch, postgres branch below uses LIMIT
+else:
+    cursor.execute("SELECT * FROM t LIMIT 10")
+```
+
+A comment can list more than one code (`ignore[DBP001,DBP003]`), but must
+have a reason — `ignore[DBP001]` with nothing after it leaves the finding
+active and appends a note asking for one, rather than silently suppressing
+it. Suppressed findings are subtracted from the exit-code-relevant count but
+still shown in the summary line (`N issue(s)... (M suppressed)`) and in the
+HTML report's summary card, so they stay auditable; pass `--show-ignored` to
+list them individually alongside their reason.
 
 ## 2. The NULL / empty-string trap
 

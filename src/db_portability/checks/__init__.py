@@ -1,16 +1,24 @@
 """
 Registry of database portability checks, keyed by (source, target).
 
-postgres -> oracle and oracle -> postgres are implemented today. To add
-another pair (e.g. mysql -> oracle), write a sibling module exposing
-SOURCE, TARGET, and run(tree), then register it below - dbp-scan's
---from/--to picks it up automatically.
+postgres -> oracle, oracle -> postgres, postgres -> mysql, and
+mysql -> postgres are implemented today. To add another pair (e.g.
+mysql -> oracle), write a sibling module exposing SOURCE, TARGET, and
+run(tree), then register it below - dbp-scan's --from/--to picks it up
+automatically.
 """
-from db_portability.checks import oracle_postgres, postgres_oracle
+from db_portability.checks import (
+    mysql_postgres,
+    oracle_postgres,
+    postgres_mysql,
+    postgres_oracle,
+)
 
 REGISTRY = {
     (postgres_oracle.SOURCE, postgres_oracle.TARGET): postgres_oracle,
     (oracle_postgres.SOURCE, oracle_postgres.TARGET): oracle_postgres,
+    (postgres_mysql.SOURCE, postgres_mysql.TARGET): postgres_mysql,
+    (mysql_postgres.SOURCE, mysql_postgres.TARGET): mysql_postgres,
 }
 
 
