@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "django-db-portability"
-version = "0.4.0"
+version = "0.5.0"
 description = "Catch Django code that breaks when ported to another database (postgres <-> oracle, postgres <-> mysql today), plus runtime helpers for the NULL/empty-string divergence between backends"
 readme = "README.md"
 requires-python = ">=3.9"
