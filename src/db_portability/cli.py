@@ -1,9 +1,9 @@
 """
 Standalone scanner CLI (`dbp-scan`) for reading db-portability findings on a
 real project. Runs the checks registered in db_portability.checks for the
-requested --from/--to pair (postgres -> oracle by default - the only pair
-implemented so far), but prints them grouped by file and colorized instead
-of a flat wall of `path:line:col: code message` lines.
+requested --from/--to pair (postgres -> oracle by default), but prints them
+grouped by file and colorized instead of a flat wall of
+`path:line:col: code message` lines.
 """
 import argparse
 import ast

@@ -3,6 +3,34 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- New `postgres -> sqlite` check pair (`DBP4xx`), available via `dbp-scan
+  --from postgres --to sqlite`. This is the pair Django projects hit when
+  tests run on SQLite and production runs on PostgreSQL:
+  - DBP401/DBP402/DBP403/DBP406: Postgres-only `contrib` fields, full-text
+    search, aggregates, and other modules (indexes/constraints/operations).
+  - DBP404: `.extra()` — raw SQL fragment, needs manual review.
+  - DBP405: raw SQL containing syntax SQLite rejects (`ILIKE`, `::` casts,
+    `#>`/`#>>`, `LATERAL`, `FOR UPDATE`, `ALTER COLUMN`, `ADD CONSTRAINT`,
+    ...). `ON CONFLICT`, `RETURNING`, and `->`/`->>` are not flagged —
+    current SQLite runs them.
+  - DBP407: `.distinct(*fields)` — PostgreSQL's `DISTINCT ON`, which raises
+    `NotSupportedError` on SQLite.
+  - DBP408: `.select_for_update()` — a bare call is ignored on SQLite (no
+    row lock), and `nowait`/`skip_locked`/`of` raise `NotSupportedError`.
+  - DBP409: `UniqueConstraint(deferrable=...)` — ignored on SQLite, so a
+    constraint PostgreSQL defers until commit is enforced immediately.
+  - DBP410: `Index`/`UniqueConstraint` `opclasses` — PostgreSQL operator
+    classes are ignored on SQLite.
+  - No empty-string/NULL trap, no declared-length requirement, and no
+    InnoDB index key-length limit in this pair. Django migration
+    operations (`AlterField`, `AddConstraint`) are not flagged: the SQLite
+    schema editor rebuilds the table for those. The same clauses in raw
+    SQL are flagged, because SQLite rejects them as written.
+
 ## [0.5.0] - 2026-09-24
 
 ### Added

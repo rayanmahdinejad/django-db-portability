@@ -11,10 +11,11 @@ the specific, well-documented gaps that leak through: source-DB-only
 empty-string/NULL trap.
 
 Checks are organized by `(source, target)` pair. **`postgres -> oracle`,
-`oracle -> postgres`, `postgres -> mysql`, and `mysql -> postgres` are
-implemented today** — see `src/db_portability/checks/`. Adding another pair
-(e.g. `mysql -> oracle`) means writing a sibling module and registering it;
-`dbp-scan`'s `--from`/`--to` picks it up automatically once it exists.
+`oracle -> postgres`, `postgres -> mysql`, `mysql -> postgres`, and
+`postgres -> sqlite` are implemented today** — see
+`src/db_portability/checks/`. Adding another pair (e.g. `mysql -> oracle`)
+means writing a sibling module and registering it; `dbp-scan`'s
+`--from`/`--to` picks it up automatically once it exists.
 
 ## Install
 
@@ -122,13 +123,45 @@ direction either — see above.
 
 DBP3xx is reserved for `mysql -> postgres`.
 
+### `postgres -> sqlite`
+
+Available through `dbp-scan --from postgres --to sqlite`. This is the pair
+Django projects hit when the test suite runs on SQLite and production runs
+on PostgreSQL. Same Postgres-only `contrib` modules, raw SQL, and
+`.distinct(*fields)` risks as `postgres -> mysql`, plus three places SQLite
+does not error but also does not do what the PostgreSQL code asked for.
+
+There is **no** empty-string/NULL trap (SQLite stores `''`), **no**
+declared-length requirement on `CharField` (`supports_unlimited_charfield`),
+and **no** InnoDB-style index key-length limit. `ON CONFLICT`, `RETURNING`,
+and JSON `->`/`->>` are not flagged: SQLite has supported them since 3.24,
+3.35, and 3.38. Django's schema editor rebuilds the table for `AlterField`
+and `AddConstraint`, so those migration operations are not flagged; the same
+clauses inside raw SQL are, because SQLite rejects `ALTER COLUMN` and
+`ADD CONSTRAINT` as written.
+
+| Code | Flags |
+|------|-------|
+| DBP401 | Postgres-only field (`ArrayField`, `HStoreField`, `CITextField`, range fields, ...) |
+| DBP402 | Postgres full-text search (`SearchVector`, `SearchQuery`, `TrigramSimilarity`, ...) — SQLite's FTS5 API is unrelated |
+| DBP403 | Postgres-only aggregate (`ArrayAgg`, `StringAgg`, `BoolAnd`, ...) |
+| DBP404 | `.extra()` — raw SQL fragment, needs manual review |
+| DBP405 | Raw SQL (`RunSQL`, `cursor.execute`, `.raw()`) containing syntax SQLite rejects (`ILIKE`, `::` casts, `#>`/`#>>`, `LATERAL`, `FOR UPDATE`, `gen_random_uuid(`, `ALTER COLUMN`, `ADD CONSTRAINT`, ...) |
+| DBP406 | Other Postgres-only `contrib` modules (indexes, constraints, operations) |
+| DBP407 | `.distinct(*fields)` — PostgreSQL's `DISTINCT ON`; SQLite raises `NotSupportedError` |
+| DBP408 | `.select_for_update()` — a bare call is ignored on SQLite (no row lock), and `nowait` / `skip_locked` / `of` raise `NotSupportedError` |
+| DBP409 | `UniqueConstraint(deferrable=...)` — ignored on SQLite, so a constraint PostgreSQL defers until commit is enforced immediately |
+| DBP410 | `Index` / `UniqueConstraint` `opclasses` — PostgreSQL operator classes are ignored on SQLite, so the index is created without them |
+
+DBP4xx is reserved for `postgres -> sqlite`. DBP404 and DBP408–DBP410 are warnings: the code runs, but not the way it does on PostgreSQL.
+
 ### `dbp-scan` — readable terminal output
 
 `flake8 --select=DBP` prints one flat line per finding, which turns into an
 unreadable wall of text on a real project. `dbp-scan` runs the same checks
 but groups findings by file and colorizes them, and lets you pick the
 `--from`/`--to` pair (`postgres -> oracle`, `oracle -> postgres`,
-`postgres -> mysql`, or `mysql -> postgres` today):
+`postgres -> mysql`, `mysql -> postgres`, or `postgres -> sqlite` today):
 
 ```bash
 dbp-scan myproject/                         # postgres -> oracle (default)
@@ -136,6 +169,7 @@ dbp-scan --from postgres --to oracle myproject/
 dbp-scan --from oracle --to postgres myproject/
 dbp-scan --from postgres --to mysql myproject/
 dbp-scan --from mysql --to postgres myproject/
+dbp-scan --from postgres --to sqlite myproject/
 dbp-scan --quiet myproject/                 # summary line only
 dbp-scan --no-color myproject/ > report.txt
 dbp-scan --format html --output report.html myproject/   # standalone HTML report

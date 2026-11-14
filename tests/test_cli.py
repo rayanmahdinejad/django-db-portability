@@ -70,6 +70,17 @@ def test_main_supports_oracle_to_postgres(tmp_path, capsys):
     assert "DBP101" in out
 
 
+def test_main_supports_postgres_to_sqlite(tmp_path, capsys):
+    f = tmp_path / "models.py"
+    f.write_text("from django.contrib.postgres.fields import ArrayField\n")
+    exit_code = cli.main(
+        ["--no-color", "--from", "postgres", "--to", "sqlite", str(f)]
+    )
+    out = capsys.readouterr().out
+    assert exit_code == 1
+    assert "DBP401" in out
+
+
 def test_main_rejects_unregistered_pair(tmp_path, capsys):
     f = tmp_path / "models.py"
     f.write_text("x = 1\n")
