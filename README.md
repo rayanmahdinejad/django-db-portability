@@ -1,252 +1,81 @@
-# django-db-portability
+<p align="center">
+  <a href="https://pypi.org/project/django-db-portability/"><img alt="PyPI" src="https://img.shields.io/pypi/v/django-db-portability?style=flat-square&color=0f6e6b"></a>
+  <a href="https://pypi.org/project/django-db-portability/"><img alt="Python" src="https://img.shields.io/pypi/pyversions/django-db-portability?style=flat-square&color=0f6e6b"></a>
+  <a href="https://github.com/rayanmahdinejad/django-db-portability/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/pypi/l/django-db-portability?style=flat-square&color=0f6e6b"></a>
+</p>
 
-Catches Django code written for one database that will break when ported to
-another, and provides runtime helpers for the one divergence static analysis
-can't catch: Oracle silently treats `''` as `NULL`, PostgreSQL doesn't.
+<h1 align="center">django-db-portability</h1>
 
-This does **not** try to make Django fully database-agnostic — Django's ORM
-already handles the common cases (pagination, joins, sequences). It targets
-the specific, well-documented gaps that leak through: source-DB-only
-`contrib` modules, raw SQL with source-DB-only syntax, and the
-empty-string/NULL trap.
+<p align="center">
+  Find Django code written for one database that breaks, or behaves differently, on another.
+</p>
 
-Checks are organized by `(source, target)` pair. **`postgres -> oracle`,
-`oracle -> postgres`, `postgres -> mysql`, `mysql -> postgres`, and
-`postgres -> sqlite` are implemented today** — see
-`src/db_portability/checks/`. Adding another pair (e.g. `mysql -> oracle`)
-means writing a sibling module and registering it; `dbp-scan`'s
-`--from`/`--to` picks it up automatically once it exists.
+<p align="center">
+  <code>postgres → oracle</code> ·
+  <code>oracle → postgres</code> ·
+  <code>postgres → mysql</code> ·
+  <code>mysql → postgres</code> ·
+  <code>postgres → sqlite</code>
+</p>
+
+Django's ORM already covers pagination, joins, and sequences. These checks cover what still leaks through: database-only `contrib` modules, raw SQL, and the empty-string / `NULL` trap. Oracle stores `''` as `NULL`. PostgreSQL does not. A runtime helper covers that case, because a scan cannot see the data.
 
 ## Install
 
 ```bash
-pip install django-db-portability          # lint checks only
-pip install "django-db-portability[django]" # + runtime helpers (fields/managers)
+pip install django-db-portability            # scanner and flake8 plugin
+pip install "django-db-portability[django]"  # plus PortableCharField / PortableManager
 ```
-
-## 1. Static checks
-
-### flake8 plugin
-
-Runs automatically once installed — flake8 picks up plugins from
-`flake8.extension` entry points. Always runs the `postgres -> oracle` checks
-(flake8 plugins have no natural way to expose a `--from`/`--to` pair):
 
 ```bash
-flake8 --select=DBP myproject/
+dbp-scan myproject/                              # postgres → oracle
+dbp-scan --from postgres --to sqlite myproject/  # tests on SQLite, production on PostgreSQL
 ```
 
-| Code | Flags |
-|------|-------|
-| DBP001 | Postgres-only field (`ArrayField`, `HStoreField`, `CITextField`, range fields, ...) |
-| DBP002 | Postgres full-text search (`SearchVector`, `SearchQuery`, `TrigramSimilarity`, ...) |
-| DBP003 | Postgres-only aggregate (`ArrayAgg`, `StringAgg`, `BoolAnd`, ...) |
-| DBP004 | `.extra()` — raw SQL fragment, needs manual review |
-| DBP005 | Raw SQL (`RunSQL`, `cursor.execute`, `.raw()`) containing Postgres-only syntax (`ON CONFLICT`, `RETURNING`, `ILIKE`, `::` casts, ...) |
-| DBP006 | `CharField`/`TextField(unique=True, blank=True)` without `null=True` — the NULL/empty-string trap below |
-| DBP007 | Other Postgres-only `contrib` modules (indexes, constraints, operations) |
-| DBP008 | `.distinct(*fields)` — PostgreSQL's `DISTINCT ON`, unsupported on every other backend |
-| DBP009 | `CharField` without `max_length` — fine on Postgres, fails Oracle's system check (`fields.E120`) |
-| DBP010 | `.annotate()` combining an aggregate (`Count`, `Sum`, ...) with a `Subquery`-based annotation — the resulting `GROUP BY` contains a subquery expression, which Oracle rejects (`ORA-22818`), even if the queryset is only ever used as the value inside another `.update(col=Subquery(...))` |
-| DBP011 | `.annotate()` with an aggregate (`Count`, `Sum`, ...) on a model known (in the same file) to have a `JSONField`, without a prior `.values()`/`.only()` to narrow the `SELECT` — the aggregate forces `GROUP BY` on every other selected column, and Oracle rejects a `JSONField`'s `CLOB`/`NCLOB` column there (`ORA-00932`), even though PostgreSQL's `jsonb` tolerates it |
+The command exits `1` when it finds anything, so it can gate CI. It skips `migrations/`, virtualenvs, and `.git`. An unknown pair exits `2`.
 
-DBP0xx is reserved for `postgres -> oracle`. A future pair gets its own
-block (DBP1xx, DBP2xx, ...) so codes stay stable as pairs are added.
+## A scan
 
-DBP011 links a queryset back to its model by name within the same file (no
-Django app registry is loaded), so it won't catch the model and the
-`.annotate()` call living in separate files (e.g. `models.py` vs `views.py`)
-— only cases where both appear together, such as a manager/queryset method
-defined on the model itself.
+```text
+myproject/api/utils.py
+  42:5  DBP403 'ArrayAgg' is a PostgreSQL-only aggregate
 
-Add to your CI lint step or `setup.cfg`:
+myproject/services.py
+  18:16  DBP408 .select_for_update() does not lock rows on SQLite
+
+2 issue(s) in 2 file(s): DBP403 x1, DBP408 x1
+```
+
+Warnings count as findings. The HTML report is one file and makes no network requests:
+
+```bash
+dbp-scan --from postgres --to sqlite --format html --output report.html --open myproject/
+```
+
+## Pairs
+
+| From | To | Command |
+|------|-----|---------|
+| postgres | oracle | `dbp-scan myproject/` and `flake8 --select=DBP` |
+| oracle | postgres | `dbp-scan --from oracle --to postgres myproject/` |
+| postgres | mysql | `dbp-scan --from postgres --to mysql myproject/` |
+| mysql | postgres | `dbp-scan --from mysql --to postgres myproject/` |
+| postgres | sqlite | `dbp-scan --from postgres --to sqlite myproject/` |
+
+The flake8 plugin always runs `postgres → oracle`. Every other pair is `dbp-scan` only.
 
 ```ini
 [flake8]
 select = E,F,DBP
 ```
 
-### the reverse direction: `oracle -> postgres`
+Codes stay in fixed blocks: `DBP0xx` oracle, `DBP1xx` back to postgres, `DBP2xx` mysql, `DBP3xx` back to postgres, `DBP4xx` sqlite. A new pair is a module in `src/db_portability/checks/` with `SOURCE`, `TARGET`, and `run(tree)`.
 
-Not exposed through the flake8 plugin (which always runs `postgres ->
-oracle` — see above), but available through `dbp-scan --from oracle --to
-postgres`. This pair is smaller: PostgreSQL is generally more permissive
-than Oracle, so most of what leaks through going this direction is raw SQL
-written against Oracle-only syntax, plus the empty-string/NULL trap biting
-in the opposite direction.
+## Empty string and NULL
 
-| Code | Flags |
-|------|-------|
-| DBP101 | Raw SQL (`RunSQL`, `cursor.execute`, `.raw()`) containing Oracle-specific syntax (`ROWNUM`, `SYSDATE`, `NVL(`, `DECODE(`, `CONNECT BY`, `MINUS`, `DUAL`, `.NEXTVAL`/`.CURRVAL`, ...) |
-| DBP102 | `.extra()` — raw SQL fragment, needs manual review |
-| DBP103 | `CharField`/`TextField(unique=True, blank=True)` without `null=True` — the reverse NULL/empty-string trap: Oracle coerces repeated blanks to `NULL` (so they pass the unique constraint), PostgreSQL doesn't, so a second blank row that worked on Oracle raises a unique-constraint violation on PostgreSQL |
+Oracle turns `''` into `NULL` on `VARCHAR2` / `CLOB`. PostgreSQL keeps `''`. Django's habit of leaving `null=True` off a `CharField` is what makes the same input store two different values. Tests miss it until that row exists.
 
-DBP1xx is reserved for `oracle -> postgres`.
-
-### `postgres -> mysql`
-
-Also not exposed through the flake8 plugin — available through `dbp-scan
---from postgres --to mysql`. Similar shape to `postgres -> oracle` (same
-Postgres-only `contrib` modules, same raw-SQL and `.distinct(*fields)`
-risks, same declared-length requirement on character columns), plus
-MySQL's InnoDB index key-length limit, which Postgres has no equivalent
-of. There is **no** empty-string/NULL trap in this direction: MySQL, like
-PostgreSQL, stores `''` as a real, non-NULL value — that divergence is
-specific to Oracle.
-
-| Code | Flags |
-|------|-------|
-| DBP201 | Postgres-only field (`ArrayField`, `HStoreField`, `CITextField`, range fields, ...) |
-| DBP202 | Postgres full-text search (`SearchVector`, `SearchQuery`, `TrigramSimilarity`, ...) — MySQL has its own, incompatible `FULLTEXT`/`MATCH AGAINST` API |
-| DBP203 | Postgres-only aggregate (`ArrayAgg`, `StringAgg`, `BoolAnd`, ...) |
-| DBP204 | `.extra()` — raw SQL fragment, needs manual review |
-| DBP205 | Raw SQL (`RunSQL`, `cursor.execute`, `.raw()`) containing Postgres-only syntax (`ON CONFLICT`, `RETURNING`, `ILIKE`, `::` casts, ...) |
-| DBP206 | Other Postgres-only `contrib` modules (indexes, constraints, operations) |
-| DBP207 | `.distinct(*fields)` — PostgreSQL's `DISTINCT ON`, unsupported on MySQL |
-| DBP208 | `CharField` without `max_length` — fine on Postgres, but MySQL's `VARCHAR` requires a declared length (fails Django's `fields.E120` on MySQL too) |
-| DBP209 | `CharField`/`TextField(unique=True)` or `db_index=True` with `max_length` over ~191 characters — PostgreSQL has no index-length limit, but MySQL's InnoDB key-length limit can reject the index on a `utf8mb4` column that long (`Specified key was too long`); the exact threshold depends on server version/config, so this needs manual review |
-
-DBP2xx is reserved for `postgres -> mysql`.
-
-### `mysql -> postgres`
-
-Available through `dbp-scan --from mysql --to postgres`. Like `oracle ->
-postgres`, this is a smaller pair: PostgreSQL is a stricter, more
-standards-compliant engine, so most of what leaks through here is raw SQL
-written against MySQL-only syntax. No empty-string/NULL trap in this
-direction either — see above.
-
-| Code | Flags |
-|------|-------|
-| DBP301 | Raw SQL (`RunSQL`, `cursor.execute`, `.raw()`) containing MySQL-specific syntax (backtick identifiers, `AUTO_INCREMENT`, `ON DUPLICATE KEY UPDATE`, `GROUP_CONCAT(`, `IFNULL(`, `STR_TO_DATE(`, `DATE_FORMAT(`, `UNSIGNED`, the `LIMIT offset, count` comma form, ...) |
-| DBP302 | `.extra()` — raw SQL fragment, needs manual review |
-
-DBP3xx is reserved for `mysql -> postgres`.
-
-### `postgres -> sqlite`
-
-Available through `dbp-scan --from postgres --to sqlite`. This is the pair
-Django projects hit when the test suite runs on SQLite and production runs
-on PostgreSQL. Same Postgres-only `contrib` modules, raw SQL, and
-`.distinct(*fields)` risks as `postgres -> mysql`, plus three places SQLite
-does not error but also does not do what the PostgreSQL code asked for.
-
-There is **no** empty-string/NULL trap (SQLite stores `''`), **no**
-declared-length requirement on `CharField` (`supports_unlimited_charfield`),
-and **no** InnoDB-style index key-length limit. `ON CONFLICT`, `RETURNING`,
-and JSON `->`/`->>` are not flagged: SQLite has supported them since 3.24,
-3.35, and 3.38. Django's schema editor rebuilds the table for `AlterField`
-and `AddConstraint`, so those migration operations are not flagged; the same
-clauses inside raw SQL are, because SQLite rejects `ALTER COLUMN` and
-`ADD CONSTRAINT` as written.
-
-| Code | Flags |
-|------|-------|
-| DBP401 | Postgres-only field (`ArrayField`, `HStoreField`, `CITextField`, range fields, ...) |
-| DBP402 | Postgres full-text search (`SearchVector`, `SearchQuery`, `TrigramSimilarity`, ...) — SQLite's FTS5 API is unrelated |
-| DBP403 | Postgres-only aggregate (`ArrayAgg`, `StringAgg`, `BoolAnd`, ...) |
-| DBP404 | `.extra()` — raw SQL fragment, needs manual review |
-| DBP405 | Raw SQL (`RunSQL`, `cursor.execute`, `.raw()`) containing syntax SQLite rejects (`ILIKE`, `::` casts, `#>`/`#>>`, `LATERAL`, `FOR UPDATE`, `gen_random_uuid(`, `ALTER COLUMN`, `ADD CONSTRAINT`, ...) |
-| DBP406 | Other Postgres-only `contrib` modules (indexes, constraints, operations) |
-| DBP407 | `.distinct(*fields)` — PostgreSQL's `DISTINCT ON`; SQLite raises `NotSupportedError` |
-| DBP408 | `.select_for_update()` — a bare call is ignored on SQLite (no row lock), and `nowait` / `skip_locked` / `of` raise `NotSupportedError` |
-| DBP409 | `UniqueConstraint(deferrable=...)` — ignored on SQLite, so a constraint PostgreSQL defers until commit is enforced immediately |
-| DBP410 | `Index` / `UniqueConstraint` `opclasses` — PostgreSQL operator classes are ignored on SQLite, so the index is created without them |
-
-DBP4xx is reserved for `postgres -> sqlite`. DBP404 and DBP408–DBP410 are warnings: the code runs, but not the way it does on PostgreSQL.
-
-### `dbp-scan` — readable terminal output
-
-`flake8 --select=DBP` prints one flat line per finding, which turns into an
-unreadable wall of text on a real project. `dbp-scan` runs the same checks
-but groups findings by file and colorizes them, and lets you pick the
-`--from`/`--to` pair (`postgres -> oracle`, `oracle -> postgres`,
-`postgres -> mysql`, `mysql -> postgres`, or `postgres -> sqlite` today):
-
-```bash
-dbp-scan myproject/                         # postgres -> oracle (default)
-dbp-scan --from postgres --to oracle myproject/
-dbp-scan --from oracle --to postgres myproject/
-dbp-scan --from postgres --to mysql myproject/
-dbp-scan --from mysql --to postgres myproject/
-dbp-scan --from postgres --to sqlite myproject/
-dbp-scan --quiet myproject/                 # summary line only
-dbp-scan --no-color myproject/ > report.txt
-dbp-scan --format html --output report.html myproject/   # standalone HTML report
-```
-
-It skips `migrations/`, `.venv`, `.git`, `__pycache__`, `node_modules`,
-`.tox`, `build`, and `dist` by default (`--exclude NAME` adds more), and
-exits `1` if any issues were found — same convention as flake8, so it's
-safe to use as a CI gate too. An unregistered pair (e.g. `--from mysql`)
-exits `2` with the list of pairs that are actually implemented.
-
-#### All `dbp-scan` options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `paths` (positional) | `.` (current directory) | One or more files or directories to scan. |
-| `--from DB` | `postgres` | Source database the code is currently written for. |
-| `--to DB` | `oracle` | Target database being ported to. Together with `--from`, picks which check module runs — see the supported pairs above. |
-| `--format {text,html}` | `text` | `text` prints findings to the terminal; `html` writes a standalone report file instead (see below). |
-| `--output FILE` | `dbp-scan-report.html` | Where to write the report when `--format html` is used. Ignored for `--format text`. |
-| `--open` | off | Open the `--format html` report in the default browser once it's written. Ignored for `--format text`. Off by default so CI runs never try to launch a browser. |
-| `--quiet` | off | Suppress per-file/per-finding output; print only the final summary line. Has no effect with `--format html` (the summary always prints there too, alongside the report). |
-| `--show-ignored` | off | Also print findings suppressed via a `# dbp-scan: ignore[...]` comment (see below). Off by default so suppressed findings stay out of the way once reviewed. |
-| `--no-color` | off | Disable ANSI colors in terminal output (also respects the `NO_COLOR` env var, and colors are auto-disabled when stdout isn't a terminal). |
-| `--no-progress` | off | Disable the live "`[i/N] path`" scanning progress line normally printed to stderr while scanning. |
-| `--exclude NAME` | (none) | Skip an additional directory name during the scan. Repeatable (`--exclude vendor --exclude fixtures`). Adds to, doesn't replace, the built-in exclude list (`migrations/`, `.venv/`, `.git/`, `__pycache__/`, `node_modules/`, `.tox/`, `build/`, `dist/`). |
-| `--version` | — | Print the installed `dbp-scan`/`django-db-portability` version and exit. |
-| `-h`, `--help` | — | Print usage and exit. |
-
-**Getting the HTML report** — the flags that matter are `--format`,
-`--output`, and `--open`:
-
-```bash
-dbp-scan --format html myproject/                          # writes ./dbp-scan-report.html
-dbp-scan --format html --output report.html myproject/     # writes ./report.html instead
-dbp-scan --format html --open myproject/                   # writes it AND opens it in your browser
-```
-
-The HTML report is a single self-contained file (no external assets) with a
-summary, a per-file breakdown, and a search/severity filter, so it's easy to
-open locally in a browser or publish as a CI artifact (e.g. upload it with
-`actions/upload-artifact` in GitHub Actions).
-
-#### Suppressing a finding
-
-For code that intentionally branches on the target database (e.g. a
-`connection.vendor == "oracle"` guard already handling the difference a
-check is flagging), silence that one finding with a trailing comment on the
-same line, naming the code(s) and a reason:
-
-```python
-from django.contrib.postgres.fields import ArrayField  # dbp-scan: ignore[DBP001] read-only mirror, Oracle side uses a JSON column instead
-
-if connection.vendor == "oracle":
-    cursor.execute("SELECT * FROM t WHERE ROWNUM <= 10")  # dbp-scan: ignore[DBP101] oracle-only branch, postgres branch below uses LIMIT
-else:
-    cursor.execute("SELECT * FROM t LIMIT 10")
-```
-
-A comment can list more than one code (`ignore[DBP001,DBP003]`), but must
-have a reason — `ignore[DBP001]` with nothing after it leaves the finding
-active and appends a note asking for one, rather than silently suppressing
-it. Suppressed findings are subtracted from the exit-code-relevant count but
-still shown in the summary line (`N issue(s)... (M suppressed)`) and in the
-HTML report's summary card, so they stay auditable; pass `--show-ignored` to
-list them individually alongside their reason.
-
-## 2. The NULL / empty-string trap
-
-Oracle coerces `''` to `NULL` for `VARCHAR2`/`CLOB` columns. PostgreSQL does
-not. Django's own convention — "never set `null=True` on `CharField`" — is
-exactly what makes the two backends disagree: identical code, identical
-input, different stored value depending on which `DATABASES` alias the query
-hits. It's data-dependent, so it won't show up as a test failure until you
-have the right data.
-
-### Option A — swap the field type
+Normalize before either database sees the value:
 
 ```python
 from db_portability.fields import PortableCharField
@@ -255,19 +84,9 @@ class Widget(models.Model):
     code = PortableCharField(max_length=20, null=True, blank=True)
 ```
 
-`PortableCharField`/`PortableTextField` normalize `''` → `None` in Python
-before the value reaches *either* database, so both backends store and
-return the same thing. This requires `null=True` — that's intentional.
+`PortableCharField` and `PortableTextField` turn `''` into `None`. `null=True` is required.
 
-### Option B — can't change the field? Query both cases explicitly
-
-```python
-from db_portability.managers import empty_or_null_q
-
-Widget.objects.filter(empty_or_null_q("code"))
-```
-
-or use the manager mixin:
+If the column has to stay as it is, query both forms:
 
 ```python
 from db_portability.managers import PortableManager
@@ -279,6 +98,148 @@ class Widget(models.Model):
 Widget.objects.empty_or_null("code")
 Widget.objects.exclude_empty_or_null("code")
 ```
+
+`empty_or_null_q("code")` is the same `Q` object when you already have a manager.
+
+## Check reference
+
+Open a pair for the full code list.
+
+<details>
+<summary><b>postgres → oracle</b> · DBP001–DBP011 · also the flake8 plugin</summary>
+
+`DBP004` and `DBP006` are warnings. `.extra()` needs a manual look, and the empty-string trap depends on the data.
+
+| Code | Flags |
+|------|-------|
+| DBP001 | Postgres-only field (`ArrayField`, `HStoreField`, `CITextField`, range fields, ...) |
+| DBP002 | Postgres full-text search (`SearchVector`, `SearchQuery`, `TrigramSimilarity`, ...) |
+| DBP003 | Postgres-only aggregate (`ArrayAgg`, `StringAgg`, `BoolAnd`, ...) |
+| DBP004 | `.extra()` — raw SQL fragment, needs manual review |
+| DBP005 | Raw SQL (`RunSQL`, `cursor.execute`, `.raw()`) with Postgres-only syntax (`ON CONFLICT`, `RETURNING`, `ILIKE`, `::` casts, ...) |
+| DBP006 | `CharField` / `TextField(unique=True, blank=True)` without `null=True` |
+| DBP007 | Other Postgres-only `contrib` modules (indexes, constraints, operations) |
+| DBP008 | `.distinct(*fields)` — PostgreSQL `DISTINCT ON` |
+| DBP009 | `CharField` without `max_length` — fails Oracle's system check (`fields.E120`) |
+| DBP010 | `.annotate()` mixing an aggregate with a `Subquery`. Oracle rejects the subquery in `GROUP BY` (`ORA-22818`), including when that queryset is only used inside `.update(col=Subquery(...))` |
+| DBP011 | Aggregate `.annotate()` on a model in the same file that has a `JSONField`, with no earlier `.values()` / `.only()`. Oracle rejects the `CLOB` / `NCLOB` column in `GROUP BY` (`ORA-00932`) |
+
+`DBP011` matches the model and the queryset by name in one file. A model in `models.py` and the call in `views.py` stays invisible.
+
+</details>
+
+<details>
+<summary><b>oracle → postgres</b> · DBP101–DBP103</summary>
+
+PostgreSQL accepts most Oracle ORM usage. What still breaks is Oracle-only SQL, and the empty-string trap in reverse: a second blank row that passed a unique constraint on Oracle raises on PostgreSQL.
+
+| Code | Flags |
+|------|-------|
+| DBP101 | Raw SQL with Oracle syntax (`ROWNUM`, `SYSDATE`, `NVL(`, `DECODE(`, `CONNECT BY`, `MINUS`, `DUAL`, `.NEXTVAL` / `.CURRVAL`, ...) |
+| DBP102 | `.extra()` — raw SQL fragment, needs manual review |
+| DBP103 | `CharField` / `TextField(unique=True, blank=True)` without `null=True` |
+
+</details>
+
+<details>
+<summary><b>postgres → mysql</b> · DBP201–DBP209</summary>
+
+Same Postgres-only modules, raw SQL, and `.distinct(*fields)` as the Oracle pair, plus MySQL's index key-length limit. MySQL stores `''` as `''`, so there is no empty-string trap. `DBP204` and `DBP209` are warnings.
+
+| Code | Flags |
+|------|-------|
+| DBP201 | Postgres-only field (`ArrayField`, `HStoreField`, `CITextField`, range fields, ...) |
+| DBP202 | Postgres full-text search. MySQL's `FULLTEXT` / `MATCH AGAINST` API is a different one |
+| DBP203 | Postgres-only aggregate (`ArrayAgg`, `StringAgg`, `BoolAnd`, ...) |
+| DBP204 | `.extra()` — raw SQL fragment, needs manual review |
+| DBP205 | Raw SQL with Postgres-only syntax (`ON CONFLICT`, `RETURNING`, `ILIKE`, `::` casts, ...) |
+| DBP206 | Other Postgres-only `contrib` modules |
+| DBP207 | `.distinct(*fields)` — `DISTINCT ON`, unsupported on MySQL |
+| DBP208 | `CharField` without `max_length` — MySQL `VARCHAR` needs a length (`fields.E120`) |
+| DBP209 | Indexed `CharField` / `TextField` longer than ~191 characters. InnoDB can reject the key (`Specified key was too long`). The limit depends on the server |
+
+</details>
+
+<details>
+<summary><b>mysql → postgres</b> · DBP301–DBP302</summary>
+
+Raw SQL written for MySQL. PostgreSQL stores `''` as `''`, so there is no empty-string trap.
+
+| Code | Flags |
+|------|-------|
+| DBP301 | Raw SQL with MySQL syntax (backticks, `AUTO_INCREMENT`, `ON DUPLICATE KEY UPDATE`, `GROUP_CONCAT(`, `IFNULL(`, `STR_TO_DATE(`, `DATE_FORMAT(`, `UNSIGNED`, `LIMIT offset, count`, ...) |
+| DBP302 | `.extra()` — raw SQL fragment, needs manual review |
+
+</details>
+
+<details>
+<summary><b>postgres → sqlite</b> · DBP401–DBP410</summary>
+
+Tests on SQLite, production on PostgreSQL. SQLite stores `''`, allows `CharField` without `max_length`, and has no InnoDB key-length limit, so those checks are absent.
+
+`ON CONFLICT`, `RETURNING`, and JSON `->` / `->>` are left alone. SQLite has supported them since 3.24, 3.35, and 3.38. Django rebuilds the table for `AlterField` and `AddConstraint`, so those migration operations are left alone too. The same clauses in raw SQL are flagged, because SQLite rejects `ALTER COLUMN` and `ADD CONSTRAINT` as written.
+
+`DBP404` and `DBP408`–`DBP410` are warnings. The code runs, but not the way it does on PostgreSQL.
+
+| Code | Flags |
+|------|-------|
+| DBP401 | Postgres-only field (`ArrayField`, `HStoreField`, `CITextField`, range fields, ...) |
+| DBP402 | Postgres full-text search. SQLite FTS5 is a different API |
+| DBP403 | Postgres-only aggregate (`ArrayAgg`, `StringAgg`, `BoolAnd`, ...) |
+| DBP404 | `.extra()` — raw SQL fragment, needs manual review |
+| DBP405 | Raw SQL SQLite rejects (`ILIKE`, `::` casts, `#>` / `#>>`, `LATERAL`, `FOR UPDATE`, `gen_random_uuid(`, `ALTER COLUMN`, `ADD CONSTRAINT`, ...) |
+| DBP406 | Other Postgres-only `contrib` modules |
+| DBP407 | `.distinct(*fields)` — `DISTINCT ON`, raises `NotSupportedError` |
+| DBP408 | `.select_for_update()` — a bare call is ignored. `nowait`, `skip_locked`, and `of` raise `NotSupportedError` |
+| DBP409 | `UniqueConstraint(deferrable=...)` — ignored, so the constraint is enforced immediately |
+| DBP410 | `opclasses` on `Index` / `UniqueConstraint` — ignored, so the index is created without them |
+
+</details>
+
+## dbp-scan
+
+```bash
+dbp-scan myproject/
+dbp-scan --from postgres --to sqlite myproject/
+dbp-scan --quiet myproject/
+dbp-scan --no-color myproject/ > report.txt
+dbp-scan --format html --output report.html --open myproject/
+```
+
+<details>
+<summary><b>Every flag</b></summary>
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `paths` | `.` | Files or directories to scan. |
+| `--from` | `postgres` | Database the code is written for. |
+| `--to` | `oracle` | Database being ported to. |
+| `--format` | `text` | `html` writes a standalone report. |
+| `--output` | `dbp-scan-report.html` | Report path for `--format html`. |
+| `--open` | off | Open the HTML report. Text output never launches a browser. |
+| `--quiet` | off | Summary line only. The HTML report still lists every finding. |
+| `--show-ignored` | off | Print suppressed findings with their reasons. |
+| `--no-color` | off | Disable ANSI color. Also honors `NO_COLOR`. Color is off when stdout is not a terminal. |
+| `--no-progress` | off | Hide the `[i/N] path` line on stderr. |
+| `--exclude` | | Extra directory name to skip. Repeatable. Adds to `migrations/`, `.venv/`, `.git/`, `__pycache__/`, `node_modules/`, `.tox/`, `build/`, `dist/`. |
+| `--version` | | Print the installed version and exit. |
+
+</details>
+
+### Silence one line
+
+The comment has to name the code and give a reason. `ignore[DBP001]` with no reason stays active.
+
+```python
+from django.contrib.postgres.fields import ArrayField  # dbp-scan: ignore[DBP001] read-only mirror, Oracle side uses a JSON column instead
+
+if connection.vendor == "oracle":
+    cursor.execute("SELECT * FROM t WHERE ROWNUM <= 10")  # dbp-scan: ignore[DBP101] oracle-only branch, postgres branch below uses LIMIT
+else:
+    cursor.execute("SELECT * FROM t LIMIT 10")
+```
+
+One comment can list several codes: `ignore[DBP001,DBP003]`. Suppressed findings leave the exit code and still show up as `(M suppressed)`. `--show-ignored` prints them.
 
 ## Development
 
